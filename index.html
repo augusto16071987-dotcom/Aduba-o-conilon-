@@ -623,11 +623,25 @@ const STORAGE_PREFIX = "adubacao_conilon_";
    uma proteção contra alguém tecnicamente capaz, só uma trava
    simples para uso comum.
 ------------------------------------------------------------------*/
-const ATIVACAO_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzJDO8FruaCSxODvswbPUEfT1VxaI63S5fLo1eg2ZZM_95yYlNNo1Cx3l9gmtCIYhhfZw/exec";
 const ATIVACAO_STORAGE_KEY = STORAGE_PREFIX + "ativacao";
+const CLIENTE_ID_KEY = STORAGE_PREFIX + "cliente_id";
 const WHATSAPP_NUMERO = "5561983819713";
+const MP_PLAN_CHECKOUT = "https://mpago.la/1UwNYWW"; // link do plano — só usado como referência/fallback
 function linkWhatsApp(mensagem) {
     return "https://wa.me/" + WHATSAPP_NUMERO + "?text=" + encodeURIComponent(mensagem);
+}
+function getClienteId() {
+    try {
+        let id = localStorage.getItem(CLIENTE_ID_KEY);
+        if (!id) {
+            id = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
+            localStorage.setItem(CLIENTE_ID_KEY, id);
+        }
+        return id;
+    }
+    catch (e) {
+        return "sem-id-" + Math.random().toString(36).slice(2, 10);
+    }
 }
 function lerAtivacao() {
     try {
@@ -638,64 +652,128 @@ function lerAtivacao() {
         return null;
     }
 }
+function salvarAtivacao(dados) {
+    try {
+        localStorage.setItem(ATIVACAO_STORAGE_KEY, JSON.stringify(dados));
+    }
+    catch (e) { }
+}
 function ativacaoValida() {
     const a = lerAtivacao();
-    if (!a || !a.expiraEm)
-        return false;
-    return new Date(a.expiraEm).getTime() > Date.now();
+    return !!(a && a.status === "authorized");
 }
-function diasAteVencer() {
-    const a = lerAtivacao();
-    if (!a || !a.expiraEm)
+// Consulta o status da assinatura direto no Firestore (não depende da
+// sincronização estar ativada — a assinatura é um recurso à parte).
+async function verificarStatusAssinaturaNaNuvem(clienteId) {
+    const docId = ("assinatura--" + clienteId).replace(/[^a-zA-Z0-9_-]/g, "_");
+    try {
+        const res = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/${FIRESTORE_COLECAO}/${docId}`, { cache: "no-store" });
+        if (!res.ok)
+            return null;
+        const json = await res.json();
+        const f = json.fields || {};
+        return {
+            status: f.status ? f.status.stringValue : null,
+            preapprovalId: f.preapprovalId ? f.preapprovalId.stringValue : null,
+            email: f.email ? f.email.stringValue : null,
+            atualizadoEm: f.atualizadoEm ? f.atualizadoEm.stringValue : null,
+        };
+    }
+    catch (e) {
         return null;
-    const diff = new Date(a.expiraEm).getTime() - Date.now();
-    return Math.ceil(diff / (24 * 60 * 60 * 1000));
+    }
 }
-function TelaAtivacao({ onAtivado }) {
-    const [codigo, setCodigo] = useState("");
+function TelaAssinatura({ onAtivado }) {
+    const clienteId = getClienteId();
+    const registroAnterior = lerAtivacao();
+    const [etapa, setEtapa] = useState(registroAnterior && registroAnterior.status && registroAnterior.status !== "authorized" ? "aguardando" : "form");
+    const [nome, setNome] = useState(registroAnterior ? registroAnterior.nome || "" : "");
+    const [email, setEmail] = useState(registroAnterior ? registroAnterior.email || "" : "");
     const [erro, setErro] = useState("");
+    const [enviando, setEnviando] = useState(false);
     const [verificando, setVerificando] = useState(false);
-    const ativacaoAnterior = lerAtivacao();
-    const expirado = ativacaoAnterior && !ativacaoValida();
-    const confirmar = async () => {
-        const codigoLimpo = codigo.trim();
-        if (!codigoLimpo)
-            return;
-        setErro("");
+    const statusAtual = registroAnterior ? registroAnterior.status : null;
+    const cancelada = statusAtual === "cancelled" || statusAtual === "paused";
+    const conferirAgora = async () => {
         setVerificando(true);
-        try {
-            const res = await fetch(ATIVACAO_APPS_SCRIPT_URL + "?codigo=" + encodeURIComponent(codigoLimpo), { cache: "no-store" });
-            const dados = await res.json();
-            if (dados.ok) {
-                const registro = { cliente: dados.cliente || codigoLimpo, ativadoEm: new Date().toISOString(), expiraEm: dados.expiraEm };
-                localStorage.setItem(ATIVACAO_STORAGE_KEY, JSON.stringify(registro));
-                onAtivado();
-            }
-            else if (dados.motivo === "ja_usado") {
-                setErro("Esse código já foi utilizado antes. Peça um código novo.");
-            }
-            else {
-                setErro("Código não encontrado. Confira e tente novamente.");
-            }
+        setErro("");
+        const info = await verificarStatusAssinaturaNaNuvem(clienteId);
+        if (info && info.status === "authorized") {
+            salvarAtivacao({ clienteId, nome, email: info.email || email, status: "authorized", ativadoEm: registroAnterior ? registroAnterior.ativadoEm : new Date().toISOString(), preapprovalId: info.preapprovalId });
+            onAtivado();
         }
-        catch (e) {
-            setErro("Não foi possível verificar o código agora — confira sua internet e tente de novo.");
+        else if (info && (info.status === "cancelled" || info.status === "paused")) {
+            salvarAtivacao({ ...(registroAnterior || {}), clienteId, status: info.status });
+            setErro("Essa assinatura está " + (info.status === "cancelled" ? "cancelada" : "pausada") + ". Assine novamente pra continuar usando.");
+        }
+        else {
+            setErro("Ainda não confirmamos o pagamento. Se você acabou de assinar, aguarde alguns segundos e tente de novo.");
         }
         setVerificando(false);
     };
+    // ao voltar do checkout do Mercado Pago, confere automaticamente
+    useEffect(() => {
+        if (etapa === "aguardando") {
+            conferirAgora();
+            const t = setInterval(conferirAgora, 8000);
+            return () => clearInterval(t);
+        }
+    }, [etapa]);
+    const comecarTeste = async () => {
+        if (!nome.trim() || !email.trim())
+            return;
+        setErro("");
+        setEnviando(true);
+        try {
+            const res = await fetch("/.netlify/functions/criar-assinatura", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ clienteId, nome: nome.trim(), email: email.trim() }),
+            });
+            const dados = await res.json();
+            if (!res.ok || !dados.initPoint) {
+                setErro(dados.erro || "Não consegui iniciar sua assinatura agora. Tente de novo em instantes.");
+                setEnviando(false);
+                return;
+            }
+            salvarAtivacao({ clienteId, nome: nome.trim(), email: email.trim(), status: "pending", ativadoEm: new Date().toISOString(), preapprovalId: dados.preapprovalId });
+            window.location.href = dados.initPoint;
+        }
+        catch (e) {
+            setErro("Não foi possível conectar agora — confira sua internet e tente de novo.");
+            setEnviando(false);
+        }
+    };
+    if (etapa === "aguardando") {
+        return (React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6" },
+            React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl border border-stone-200 p-6 text-center" },
+                React.createElement("div", { className: "w-14 h-14 rounded-full bg-[#e7ebdd] text-[#33422e] flex items-center justify-center mx-auto mb-3" },
+                    React.createElement(Icon, { name: "leaf", size: 26 })),
+                React.createElement("h1", { className: "text-lg font-bold text-stone-800" }, "NutriCaf\u00E9"),
+                cancelada ? (React.createElement("p", { className: "text-sm text-[#a8442f] mt-1 mb-4" }, "Sua assinatura n\u00E3o est\u00E1 ativa no momento.")) : (React.createElement("p", { className: "text-sm text-stone-500 mt-1 mb-4" }, "Confirmando sua assinatura com o Mercado Pago\u2026 isso costuma levar s\u00F3 alguns segundos.")),
+                !cancelada && React.createElement("div", { className: "flex justify-center mb-4" },
+                    React.createElement(Icon, { name: "leaf", size: 22, className: "text-[#4c6146] animate-pulse" })),
+                erro && React.createElement("p", { className: "text-xs text-[#a8442f] mb-3" }, erro),
+                React.createElement("button", { onClick: conferirAgora, disabled: verificando, className: "w-full bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, verificando ? "Verificando..." : "Verificar agora"),
+                cancelada && React.createElement("button", { onClick: () => setEtapa("form"), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "Assinar novamente"),
+                React.createElement("a", { href: linkWhatsApp("Olá! Estou com dificuldade pra confirmar minha assinatura do NutriCafé."), target: "_blank", rel: "noopener noreferrer", className: "w-full mt-3 flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold" },
+                    React.createElement(Icon, { name: "whatsapp", size: 17 }),
+                    " Preciso de ajuda"))));
+    }
     return (React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6" },
-        React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl border border-stone-200 p-6 text-center" },
+        React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl border border-stone-200 p-6" },
             React.createElement("div", { className: "w-14 h-14 rounded-full bg-[#e7ebdd] text-[#33422e] flex items-center justify-center mx-auto mb-3" },
                 React.createElement(Icon, { name: "leaf", size: 26 })),
-            React.createElement("h1", { className: "text-lg font-bold text-stone-800" }, "NutriCaf\u00E9"),
-            expirado ? (React.createElement("p", { className: "text-sm text-[#a8442f] mt-1 mb-4" },
-                "Seu c\u00F3digo expirou em ",
-                new Date(ativacaoAnterior.expiraEm).toLocaleDateString("pt-BR"),
-                ". Pe\u00E7a um c\u00F3digo novo para renovar e digite abaixo.")) : (React.createElement("p", { className: "text-sm text-stone-500 mt-1 mb-4" }, "Digite o c\u00F3digo de ativa\u00E7\u00E3o que voc\u00EA recebeu para liberar o app.")),
-            React.createElement("input", { className: inputCls + " text-center tracking-widest font-semibold", placeholder: "Digite seu c\u00F3digo", value: codigo, onChange: (e) => { setCodigo(e.target.value); setErro(""); }, autoCapitalize: "characters", disabled: verificando }),
-            erro && React.createElement("p", { className: "text-xs text-[#a8442f] mt-2" }, erro),
-            React.createElement("button", { onClick: confirmar, disabled: !codigo.trim() || verificando, className: "w-full mt-4 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, verificando ? "Verificando..." : "Ativar"),
-            React.createElement("a", { href: linkWhatsApp(expirado ? "Olá! Meu acesso ao NutriCafé venceu e preciso de um código novo pra renovar." : "Olá! Preciso de um código de ativação pro NutriCafé."), target: "_blank", rel: "noopener noreferrer", className: "w-full mt-3 flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold" },
+            React.createElement("h1", { className: "text-lg font-bold text-stone-800 text-center" }, "NutriCaf\u00E9"),
+            React.createElement("p", { className: "text-sm text-stone-500 text-center mt-1 mb-4" }, "30 dias grátis pra testar. Depois, R$ 9,99/mês — cancele quando quiser."),
+            React.createElement(Field, { label: "Seu nome" },
+                React.createElement("input", { className: inputCls, placeholder: "Nome completo", value: nome, onChange: (e) => setNome(e.target.value), disabled: enviando })),
+            React.createElement(Field, { label: "Seu e-mail" },
+                React.createElement("input", { type: "email", className: inputCls, placeholder: "seu@email.com", value: email, onChange: (e) => setEmail(e.target.value), disabled: enviando })),
+            erro && React.createElement("p", { className: "text-xs text-[#a8442f] mb-2" }, erro),
+            React.createElement("button", { onClick: comecarTeste, disabled: !nome.trim() || !email.trim() || enviando, className: "w-full mt-2 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, enviando ? "Preparando..." : "Come\u00E7ar teste gr\u00E1tis de 30 dias"),
+            React.createElement("p", { className: "text-[11px] text-stone-400 text-center mt-2" }, "Voc\u00EA vai ser levado ao Mercado Pago pra cadastrar um cart\u00E3o v\u00E1lido. Nada \u00E9 cobrado nos primeiros 30 dias."),
+            React.createElement("a", { href: linkWhatsApp("Olá! Tenho uma dúvida sobre a assinatura do NutriCafé."), target: "_blank", rel: "noopener noreferrer", className: "w-full mt-4 flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold" },
                 React.createElement(Icon, { name: "whatsapp", size: 17 }),
                 " Falar no WhatsApp"))));
 }
@@ -4358,7 +4436,6 @@ function SecaoColapsavel({ titulo, badge, aberta, onToggle, children }) {
 }
 function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, onAddTabelaCustomizada, onUpdateTabelaCustomizada, onDeleteTabelaCustomizada }) {
     const ativacao = lerAtivacao();
-    const dias = diasAteVencer();
     const valido = ativacaoValida();
     const fileInputRef = useRef(null);
     const [mensagemRestauracao, setMensagemRestauracao] = useState("");
@@ -4422,24 +4499,23 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
         React.createElement("div", { className: "px-4 mt-4 space-y-3" },
             React.createElement(SecaoColapsavel, { titulo: "Assinatura", aberta: secaoAberta === "assinatura", onToggle: () => alternarSecao("assinatura") },
             ativacao ? (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm overflow-hidden" },
-                React.createElement("div", { className: "px-4 py-2.5 text-xs font-semibold uppercase tracking-wide " + (valido ? "bg-[#e7ebdd] text-[#33422e]" : "bg-red-50 text-red-700") }, valido ? "Assinatura ativa" : "Assinatura expirada"),
+                React.createElement("div", { className: "px-4 py-2.5 text-xs font-semibold uppercase tracking-wide " + (valido ? "bg-[#e7ebdd] text-[#33422e]" : "bg-red-50 text-red-700") }, valido ? "Assinatura ativa" : ativacao.status === "pending" ? "Aguardando confirma\u00E7\u00E3o" : "Assinatura inativa"),
                 React.createElement("div", { className: "px-4 py-2" },
-                    React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100" },
-                        React.createElement("span", { className: "text-stone-500 text-sm" }, "Cliente"),
-                        React.createElement("span", { className: "font-semibold text-stone-800" }, ativacao.cliente)),
-                    React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100" },
-                        React.createElement("span", { className: "text-stone-500 text-sm" }, "Ativado em"),
-                        React.createElement("span", { className: "font-semibold text-stone-800" }, new Date(ativacao.ativadoEm).toLocaleDateString("pt-BR"))),
-                    React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100" },
-                        React.createElement("span", { className: "text-stone-500 text-sm" }, "Vence em"),
-                        React.createElement("span", { className: "font-semibold text-stone-800" }, new Date(ativacao.expiraEm).toLocaleDateString("pt-BR"))),
-                    valido && dias != null && (React.createElement("div", { className: "flex items-center justify-between py-2" },
-                        React.createElement("span", { className: "text-stone-500 text-sm" }, "Dias restantes"),
-                        React.createElement("span", { className: "font-semibold " + (dias <= 30 ? "text-amber-600" : "text-stone-800") }, dias)))))) : (React.createElement("p", { className: "text-center text-stone-400 text-sm py-4" }, "Nenhuma informa\u00E7\u00E3o de assinatura encontrada.")),
-            React.createElement("a", { href: linkWhatsApp(valido ? "Olá! Gostaria de tirar uma dúvida sobre minha assinatura do NutriCafé." : "Olá! Minha assinatura do NutriCafé venceu e preciso de um código novo pra renovar."), target: "_blank", rel: "noopener noreferrer", className: "w-full flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold mt-3" },
+                    ativacao.nome && React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100" },
+                        React.createElement("span", { className: "text-stone-500 text-sm" }, "Nome"),
+                        React.createElement("span", { className: "font-semibold text-stone-800" }, ativacao.nome)),
+                    ativacao.email && React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100" },
+                        React.createElement("span", { className: "text-stone-500 text-sm" }, "E-mail"),
+                        React.createElement("span", { className: "font-semibold text-stone-800 truncate ml-2" }, ativacao.email)),
+                    ativacao.ativadoEm && React.createElement("div", { className: "flex items-center justify-between py-2" },
+                        React.createElement("span", { className: "text-stone-500 text-sm" }, "Assinante desde"),
+                        React.createElement("span", { className: "font-semibold text-stone-800" }, new Date(ativacao.ativadoEm).toLocaleDateString("pt-BR")))),
+                React.createElement("p", { className: "text-[11px] text-stone-400 px-4 pb-3" }, "R$ 9,99/m\u00EAs \u2014 cobrado automaticamente pelo Mercado Pago. Pra cancelar ou trocar de cart\u00E3o, use a conta do Mercado Pago com que voc\u00EA assinou.")))
+                : (React.createElement("p", { className: "text-center text-stone-400 text-sm py-4" }, "Nenhuma informa\u00E7\u00E3o de assinatura encontrada.")),
+            React.createElement("a", { href: linkWhatsApp(valido ? "Olá! Gostaria de tirar uma dúvida sobre minha assinatura do NutriCafé." : "Olá! Minha assinatura do NutriCafé não está ativa e preciso de ajuda."), target: "_blank", rel: "noopener noreferrer", className: "w-full flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold mt-3" },
                 React.createElement(Icon, { name: "whatsapp", size: 17 }),
                 " ",
-                valido ? "Falar no WhatsApp" : "Renovar no WhatsApp")),
+                valido ? "Falar no WhatsApp" : "Preciso de ajuda no WhatsApp")),
             React.createElement(SecaoColapsavel, { titulo: "Sincroniza\u00E7\u00E3o na nuvem", aberta: secaoAberta === "sync", onToggle: () => alternarSecao("sync"), badge: React.createElement("span", { className: "text-[10px] font-semibold px-1.5 py-0.5 rounded-full " + (syncAtivo() ? "bg-[#e7ebdd] text-[#33422e]" : "bg-amber-50 text-amber-700") }, syncAtivo() ? "Ativa" : "N\u00E3o configurada") },
                 React.createElement("p", { className: "text-sm text-stone-600 mb-3" }, "Com isso ativo, tudo que voc\u00EA salva no app vai automaticamente pra nuvem tamb\u00E9m. Se trocar de celular, informe o mesmo ID abaixo pra recuperar os dados sozinho."),
                 React.createElement("label", { className: "block text-xs font-semibold tracking-wide text-stone-500 uppercase mb-1" }, "ID de sincroniza\u00E7\u00E3o"),
@@ -4496,23 +4572,11 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
         })));
 }
 function AvisoVencimento() {
-    const dias = diasAteVencer();
-    if (dias == null || dias > 30 || dias < 0)
-        return null;
-    const ativacao = lerAtivacao();
-    const dataVenc = ativacao ? new Date(ativacao.expiraEm).toLocaleDateString("pt-BR") : "";
-    const msg = "Olá! Meu acesso ao NutriCafé vence em " + dataVenc + " e eu gostaria de renovar.";
-    return (React.createElement("div", { className: "bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-3" },
-        React.createElement(Icon, { name: "alert", size: 18, className: "text-amber-600 shrink-0" }),
-        React.createElement("div", { className: "flex-1" },
-            React.createElement("p", { className: "text-sm text-amber-800 font-medium" },
-                dias === 0 ? "Seu acesso vence hoje" : `Seu acesso vence em ${dias} dia${dias === 1 ? "" : "s"}`,
-                " (",
-                dataVenc,
-                ")"),
-            React.createElement("a", { href: linkWhatsApp(msg), target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1.5 text-sm font-semibold text-[#128C4A] mt-1" },
-                React.createElement(Icon, { name: "whatsapp", size: 14 }),
-                " Renovar no WhatsApp"))));
+    // Com assinatura recorrente automática, quem chega até a tela inicial
+    // já está com o pagamento em dia — o bloqueio acontece antes, na
+    // TelaAssinatura. Fica só como no-op pra não precisar mexer no ponto
+    // onde é chamado.
+    return null;
 }
 function AcaoTile({ icon, cor, corFundo, label, onClick, full }) {
     if (full) {
@@ -5175,6 +5239,26 @@ function TelaSuporte() {
 /* ------------------------------ APP ----------------------------- */
 function App() {
     const [ativado, setAtivado] = useState(ativacaoValida());
+    useEffect(() => {
+        if (!ativado)
+            return;
+        const CHAVE_ULTIMA_CONFERENCIA = STORAGE_PREFIX + "assinatura_conferida_em";
+        const ultima = localStorage.getItem(CHAVE_ULTIMA_CONFERENCIA);
+        const passouUmDia = !ultima || (Date.now() - Number(ultima)) > 24 * 60 * 60 * 1000;
+        if (!passouUmDia)
+            return;
+        const registro = lerAtivacao();
+        if (!registro || !registro.clienteId)
+            return;
+        verificarStatusAssinaturaNaNuvem(registro.clienteId).then((info) => {
+            localStorage.setItem(CHAVE_ULTIMA_CONFERENCIA, String(Date.now()));
+            if (info && info.status && info.status !== registro.status) {
+                salvarAtivacao({ ...registro, status: info.status });
+                if (info.status !== "authorized")
+                    setAtivado(false);
+            }
+        });
+    }, [ativado]);
     const [talhoes, setTalhoes] = useState([]);
     const [analises, setAnalises] = useState({});
     const [adubacoes, setAdubacoes] = useState({});
@@ -5448,7 +5532,7 @@ function App() {
     const deleteCompra = (id) => persistCompras(compras.filter((x) => x.id !== id));
     const selected = talhoes.find((t) => t.id === selectedId);
     if (!ativado) {
-        return React.createElement(TelaAtivacao, { onAtivado: () => setAtivado(true) });
+        return React.createElement(TelaAssinatura, { onAtivado: () => setAtivado(true) });
     }
     if (!loaded) {
         return React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center" },
