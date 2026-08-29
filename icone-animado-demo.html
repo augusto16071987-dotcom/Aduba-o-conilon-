@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ícone animado — NutriCafé</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    background: #f2ece0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .caixa {
+    width: 240px;
+    height: 240px;
+    background: #33422e;
+    border-radius: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: visible;
+  }
+  svg { width: 150px; height: 150px; color: #fff; overflow: visible; }
+  p { color: #57624f; font-size: 15px; text-align: center; max-width: 320px; padding: 0 20px; }
+  .legenda { display: flex; gap: 16px; font-size: 13px; color: #57624f; }
+  .legenda span { display: flex; align-items: center; gap: 5px; }
+  .bolinha { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+
+  @keyframes crescer {
+    0%, 100% { transform: scaleY(1) scaleX(1) translateY(0); }
+    50% { transform: scaleY(1.15) scaleX(1.06) translateY(-3px); }
+  }
+  .animate-crescer { animation: crescer 2.2s ease-in-out infinite; transform-origin: bottom center; display: inline-block; }
+
+  @keyframes subirNutriente {
+    0% { transform: translateY(0); opacity: 0; }
+    12% { opacity: 1; }
+    75% { opacity: 1; }
+    100% { transform: translateY(-85px); opacity: 0; }
+  }
+  .nutriente-subindo { animation: subirNutriente 2.3s ease-in infinite; transform-box: fill-box; transform-origin: center; }
+  .nutriente-1 { animation-delay: 0s; }
+  .nutriente-2 { animation-delay: 0.75s; }
+  .nutriente-3 { animation-delay: 1.5s; }
+</style>
+</head>
+<body>
+  <div class="caixa">
+    <svg class="animate-crescer" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 21h10M12 21V11" />
+      <path d="M10.5 21c-1 .8-2 1.3-3.2 2.3M13.5 21c1 .8 2 1.3 3.2 2.3M12 21v2.6" opacity="0.6" />
+      <path d="M12 15S7 15 5 10c3.5-1.2 7 0 7 5Z" />
+      <path d="M12 15S17 15 19 10c-3.5-1.2-7 0-7 5Z" />
+      <path d="M12 11S9 11 8 7.5c2.5-1 4.5 0 4 3.5Z" />
+      <path d="M12 11S15 11 16 7.5c-2.5-1-4.5 0-4 3.5Z" />
+
+      <g class="nutriente-subindo nutriente-1">
+        <circle cx="10.5" cy="22.5" r="1.7" fill="#8ecae6" stroke="none" />
+        <text x="10.5" y="22.5" font-size="2" fill="#1b3a4b" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-family="Arial, sans-serif">N</text>
+      </g>
+      <g class="nutriente-subindo nutriente-2">
+        <circle cx="12" cy="23" r="1.7" fill="#ffb703" stroke="none" />
+        <text x="12" y="23" font-size="2" fill="#5c3d00" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-family="Arial, sans-serif">P</text>
+      </g>
+      <g class="nutriente-subindo nutriente-3">
+        <circle cx="13.5" cy="22.5" r="1.7" fill="#d8b4fe" stroke="none" />
+        <text x="13.5" y="22.5" font-size="2" fill="#4c1d95" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-family="Arial, sans-serif">K</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="legenda">
+    <span><i class="bolinha" style="background:#8ecae6"></i> N</span>
+    <span><i class="bolinha" style="background:#ffb703"></i> P</span>
+    <span><i class="bolinha" style="background:#d8b4fe"></i> K</span>
+  </div>
+
+  <p>Nutrientes (N, P, K) nascendo nas raízes e subindo pelo caule até as folhas, um atrás do outro, enquanto o broto todo "respira/cresce" devagar.</p>
+</body>
+</html>
