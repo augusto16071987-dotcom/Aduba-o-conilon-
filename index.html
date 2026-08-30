@@ -141,6 +141,12 @@ function Icon({ name, size = 18, className = "" }) {
         case "settings": return React.createElement("svg", { ...common },
             React.createElement("circle", { cx: "12", cy: "12", r: "3" }),
             React.createElement("path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" }));
+        case "chat": return React.createElement("svg", { ...common },
+            React.createElement("path", { d: "M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" }));
+        case "paperclip": return React.createElement("svg", { ...common },
+            React.createElement("path", { d: "m21.4 11.5-9 9a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8" }));
+        case "send": return React.createElement("svg", { ...common },
+            React.createElement("path", { d: "m22 2-20 7 8 3 3 8 9-18Z" }));
         case "brotoCafe": return React.createElement("svg", { ...common },
             React.createElement("path", { d: "M12 22V10", strokeWidth: 1.4 }),
             React.createElement("path", { d: "M12 15S6 15 4 9c4-1.5 8 0 8 6Z", strokeWidth: 1.4 }),
@@ -660,7 +666,9 @@ function salvarAtivacao(dados) {
 }
 function ativacaoValida() {
     const a = lerAtivacao();
-    return !!(a && a.status === "authorized");
+    if (!a || a.status !== "authorized") return false;
+    if (a.validoAte && new Date(a.validoAte) < new Date()) return false;
+    return true;
 }
 // Consulta o status da assinatura direto no Firestore (não depende da
 // sincronização estar ativada — a assinatura é um recurso à parte).
@@ -677,6 +685,7 @@ async function verificarStatusAssinaturaNaNuvem(clienteId) {
             preapprovalId: f.preapprovalId ? f.preapprovalId.stringValue : null,
             email: f.email ? f.email.stringValue : null,
             atualizadoEm: f.atualizadoEm ? f.atualizadoEm.stringValue : null,
+            validoAte: f.validoAte ? f.validoAte.stringValue : null,
         };
     }
     catch (e) {
@@ -699,7 +708,7 @@ function TelaAssinatura({ onAtivado }) {
         setErro("");
         const info = await verificarStatusAssinaturaNaNuvem(clienteId);
         if (info && info.status === "authorized") {
-            salvarAtivacao({ clienteId, nome, email: info.email || email, status: "authorized", ativadoEm: registroAnterior ? registroAnterior.ativadoEm : new Date().toISOString(), preapprovalId: info.preapprovalId });
+            salvarAtivacao({ clienteId, nome, email: info.email || email, status: "authorized", ativadoEm: registroAnterior ? registroAnterior.ativadoEm : new Date().toISOString(), preapprovalId: info.preapprovalId, validoAte: info.validoAte || null });
             onAtivado();
         }
         else if (info && (info.status === "cancelled" || info.status === "paused")) {
@@ -833,6 +842,129 @@ function firestoreDocUrl(chave, syncIdForcado) {
     const syncId = syncIdForcado || getSyncId();
     const docId = (syncId + "--" + chave).replace(/[^a-zA-Z0-9_-]/g, "_");
     return `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/${FIRESTORE_COLECAO}/${docId}`;
+}
+
+/* ------------------------------ COMUNIDADE (chat) ----------------------------- */
+// Coleção separada, só pra mensagens do bate-papo — assim não mistura com
+// os dados de cada talhão nem com os registros de assinatura.
+const COMUNIDADE_COLECAO = "nutricafe_comunidade";
+function comunidadeUrl(sufixo) {
+    return `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/${COMUNIDADE_COLECAO}${sufixo || ""}`;
+}
+function campoTexto(v) { return v ? { stringValue: v } : null; }
+
+async function buscarMensagensComunidade(limite) {
+    if (!syncAtivo()) return [];
+    try {
+        const res = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents:runQuery`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                structuredQuery: {
+                    from: [{ collectionId: COMUNIDADE_COLECAO }],
+                    orderBy: [{ field: { fieldPath: "criadoEm" }, direction: "DESCENDING" }],
+                    limit: limite || 40,
+                },
+            }),
+        });
+        const linhas = await res.json();
+        const msgs = (linhas || [])
+            .filter((l) => l.document)
+            .map((l) => {
+                const f = l.document.fields || {};
+                return {
+                    id: l.document.name.split("/").pop(),
+                    texto: f.texto ? f.texto.stringValue : "",
+                    autorNome: f.autorNome ? f.autorNome.stringValue : "Anônimo",
+                    criadoEm: f.criadoEm ? f.criadoEm.stringValue : "",
+                    tipo: f.tipo ? f.tipo.stringValue : "texto",
+                    fotoBase64: f.fotoBase64 ? f.fotoBase64.stringValue : null,
+                    arquivoBase64: f.arquivoBase64 ? f.arquivoBase64.stringValue : null,
+                    arquivoNome: f.arquivoNome ? f.arquivoNome.stringValue : null,
+                };
+            });
+        return msgs.reverse(); // mais antigas primeiro, pra exibir de cima pra baixo
+    } catch (e) {
+        console.error("Erro ao buscar mensagens da comunidade", e);
+        return [];
+    }
+}
+
+async function enviarMensagemComunidade({ texto, autorNome, tipo, fotoBase64, arquivoBase64, arquivoNome }) {
+    const fields = {
+        autorNome: campoTexto(autorNome || "Anônimo"),
+        criadoEm: campoTexto(new Date().toISOString()),
+        tipo: campoTexto(tipo || "texto"),
+    };
+    if (texto) fields.texto = campoTexto(texto);
+    if (fotoBase64) fields.fotoBase64 = campoTexto(fotoBase64);
+    if (arquivoBase64) fields.arquivoBase64 = campoTexto(arquivoBase64);
+    if (arquivoNome) fields.arquivoNome = campoTexto(arquivoNome);
+    Object.keys(fields).forEach((k) => { if (!fields[k]) delete fields[k]; });
+    const res = await fetch(comunidadeUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields }),
+    });
+    if (!res.ok) throw new Error("Falha ao enviar mensagem");
+}
+
+async function apagarMensagemComunidade(id) {
+    await fetch(comunidadeUrl("/" + id), { method: "DELETE" });
+}
+
+// Comprime uma imagem no navegador (reduzindo qualidade/tamanho) até caber
+// no limite de bytes, e devolve como data URI base64 pronta pra salvar.
+function comprimirImagem(file, maxBytes) {
+    return new Promise((resolve, reject) => {
+        const leitor = new FileReader();
+        leitor.onerror = () => reject(new Error("Não consegui ler o arquivo."));
+        leitor.onload = () => {
+            const img = new Image();
+            img.onerror = () => reject(new Error("Arquivo de imagem inválido."));
+            img.onload = () => {
+                let largura = img.width, altura = img.height;
+                const tentar = (qualidade, escala) => {
+                    const w = Math.round(largura * escala), h = Math.round(altura * escala);
+                    const canvas = document.createElement("canvas");
+                    canvas.width = w; canvas.height = h;
+                    canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+                    return canvas.toDataURL("image/jpeg", qualidade);
+                };
+                let escala = 1, qualidade = 0.85, resultado = tentar(qualidade, escala);
+                let tentativas = 0;
+                while (resultado.length > maxBytes && tentativas < 8) {
+                    if (qualidade > 0.4) qualidade -= 0.15;
+                    else escala *= 0.8;
+                    resultado = tentar(qualidade, escala);
+                    tentativas++;
+                }
+                if (resultado.length > maxBytes) {
+                    reject(new Error("Essa foto ainda ficou grande demais mesmo comprimida. Tente uma foto mais simples."));
+                    return;
+                }
+                resolve(resultado);
+            };
+            img.src = leitor.result;
+        };
+        leitor.readAsDataURL(file);
+    });
+}
+
+// Pra arquivos que não são imagem (PDF etc) — só lê como base64 e checa o tamanho.
+function lerArquivoComoBase64(file, maxBytes) {
+    return new Promise((resolve, reject) => {
+        const leitor = new FileReader();
+        leitor.onerror = () => reject(new Error("Não consegui ler o arquivo."));
+        leitor.onload = () => {
+            if (leitor.result.length > maxBytes) {
+                reject(new Error("Esse arquivo é grande demais (máximo ~500KB)."));
+                return;
+            }
+            resolve(leitor.result);
+        };
+        leitor.readAsDataURL(file);
+    });
 }
 
 async function carregarDaNuvem(chave) {
@@ -5057,6 +5189,71 @@ function suporteSolicitado() {
         return new URLSearchParams(window.location.search).get("suporte") === SUPORTE_SENHA;
     } catch (e) { return false; }
 }
+function TelaLiberarAssinatura({ onBack }) {
+    const [nome, setNome] = useState("");
+    const [meses, setMeses] = useState(1);
+    const [enviando, setEnviando] = useState(false);
+    const [erro, setErro] = useState("");
+    const [opcoes, setOpcoes] = useState(null);
+    const [sucesso, setSucesso] = useState(null);
+
+    const liberar = async () => {
+        if (!nome.trim()) return;
+        setEnviando(true);
+        setErro("");
+        setOpcoes(null);
+        setSucesso(null);
+        try {
+            const res = await fetch("/.netlify/functions/liberar-manual", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ senha: SUPORTE_SENHA, nome: nome.trim(), meses }),
+            });
+            const dados = await res.json();
+            if (!res.ok) {
+                setErro(dados.erro || "Não consegui liberar agora.");
+                if (dados.opcoes) setOpcoes(dados.opcoes);
+                setEnviando(false);
+                return;
+            }
+            setSucesso(dados);
+        } catch (e) {
+            setErro("Não foi possível conectar agora. Tente de novo.");
+        }
+        setEnviando(false);
+    };
+
+    return React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6" },
+        React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl border border-stone-200 p-6" },
+            React.createElement("button", { onClick: onBack, className: "text-xs text-stone-500 font-semibold mb-3" }, "\u2190 voltar"),
+            React.createElement("h1", { className: "text-lg font-bold text-stone-800 mb-1" }, "\ud83d\udd13 Liberar assinatura manualmente"),
+            React.createElement("p", { className: "text-sm text-stone-500 mb-4" }, "Pra quando o cliente paga por fora (PIX, dinheiro etc). Ele precisa ter aberto a tela de assinatura no app pelo menos uma vez."),
+            sucesso ? (
+                React.createElement("div", { className: "bg-[#e7ebdd] rounded-lg p-4" },
+                    React.createElement("p", { className: "text-sm font-semibold text-[#33422e]" }, "\u2705 Liberado com sucesso!"),
+                    React.createElement("p", { className: "text-xs text-stone-600 mt-1" }, sucesso.nome + (sucesso.email ? " — " + sucesso.email : "")),
+                    React.createElement("p", { className: "text-xs text-stone-600 mt-1" }, "Válido até " + new Date(sucesso.validoAte).toLocaleDateString("pt-BR")),
+                    React.createElement("button", { onClick: () => { setSucesso(null); setNome(""); }, className: "w-full mt-4 bg-[#33422e] text-white font-semibold rounded-lg py-2.5" }, "Liberar outro cliente")
+                )
+            ) : (
+                React.createElement(React.Fragment, null,
+                    React.createElement("label", { className: "text-xs font-semibold text-stone-500" }, "NOME DO CLIENTE (como ele digitou no app)"),
+                    React.createElement("input", { className: inputCls + " mt-1 mb-4", placeholder: "Ex: Grace Kelly Souza", value: nome, onChange: function (e) { setNome(e.target.value); setErro(""); setOpcoes(null); } }),
+                    React.createElement("label", { className: "text-xs font-semibold text-stone-500" }, "QUANTOS MESES LIBERAR"),
+                    React.createElement("div", { className: "flex items-center gap-3 mt-1 mb-4" },
+                        React.createElement("button", { onClick: () => setMeses(Math.max(1, meses - 1)), className: "w-10 h-10 rounded-lg border border-stone-300 text-lg font-bold text-stone-700" }, "\u2212"),
+                        React.createElement("span", { className: "flex-1 text-center text-lg font-bold text-stone-800" }, meses + (meses === 1 ? " mês" : " meses")),
+                        React.createElement("button", { onClick: () => setMeses(meses + 1), className: "w-10 h-10 rounded-lg border border-stone-300 text-lg font-bold text-stone-700" }, "+")),
+                    erro ? React.createElement("p", { className: "text-xs text-[#a8442f] mb-3" }, erro) : null,
+                    opcoes ? React.createElement("div", { className: "mb-3" },
+                        opcoes.map((o, i) => React.createElement("p", { key: i, className: "text-xs text-stone-600" }, "• " + o.nome + (o.email ? " — " + o.email : "")))
+                    ) : null,
+                    React.createElement("button", { onClick: liberar, disabled: !nome.trim() || enviando, className: "w-full bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, enviando ? "Liberando..." : "Liberar acesso")
+                )
+            )
+        )
+    );
+}
 function TelaSuporte() {
     const [syncId, setSyncId] = useState("");
     const [carregando, setCarregando] = useState(false);
@@ -5066,6 +5263,8 @@ function TelaSuporte() {
     const [showCompras, setShowCompras] = useState(false);
     const [showCalendario, setShowCalendario] = useState(false);
     const [showRelatorio, setShowRelatorio] = useState(false);
+    const [showLiberar, setShowLiberar] = useState(false);
+    const [showModerarChat, setShowModerarChat] = useState(false);
     const noop = () => {};
     const CHAVES = ["talhoes", "analises_por_talhao", "adubacoes_por_talhao", "defensivos_por_talhao", "despesas_por_talhao", "receitas_por_talhao", "compras", "agendamentos_por_talhao", "tabelas_customizadas"];
     const carregar = async () => {
@@ -5114,6 +5313,14 @@ function TelaSuporte() {
     };
     const sair = () => { window.location.href = window.location.pathname; };
 
+    if (showLiberar) {
+        return React.createElement(TelaLiberarAssinatura, { onBack: () => setShowLiberar(false) });
+    }
+
+    if (showModerarChat) {
+        return React.createElement(TelaComunidade, { onBack: () => setShowModerarChat(false), meuNome: "Suporte", souAdmin: true });
+    }
+
     if (!dados) {
         return React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6" },
             React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl border border-stone-200 p-6" },
@@ -5121,7 +5328,9 @@ function TelaSuporte() {
                 React.createElement("p", { className: "text-sm text-stone-500 mb-4" }, "Digite o ID de sincroniza\u00e7\u00e3o do cliente pra ver o app dele por dentro, do jeito que ele v\u00ea (somente leitura \u2014 nada aqui altera o que ele tem salvo)."),
                 React.createElement("input", { className: inputCls, placeholder: "Ex: sitio-vlt3ys", value: syncId, onChange: function (e) { setSyncId(e.target.value); setErro(""); }, onKeyDown: function (e) { if (e.key === "Enter") carregar(); } }),
                 erro ? React.createElement("p", { className: "text-xs text-[#a8442f] mt-2" }, erro) : null,
-                React.createElement("button", { onClick: carregar, disabled: !syncId.trim() || carregando, className: "w-full mt-4 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, carregando ? "Carregando..." : "Carregar dados")
+                React.createElement("button", { onClick: carregar, disabled: !syncId.trim() || carregando, className: "w-full mt-4 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, carregando ? "Carregando..." : "Carregar dados"),
+                React.createElement("button", { onClick: () => setShowLiberar(true), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "\ud83d\udd13 Liberar assinatura manualmente"),
+                React.createElement("button", { onClick: () => setShowModerarChat(true), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "\ud83d\udcac Moderar comunidade (chat)")
             )
         );
     }
@@ -5237,6 +5446,117 @@ function TelaSuporte() {
     );
 }
 /* ------------------------------ APP ----------------------------- */
+/* ------------------------------ TELA COMUNIDADE (chat) ----------------------------- */
+const TAMANHO_MAX_FOTO = 700 * 1024;
+const TAMANHO_MAX_ARQUIVO = 500 * 1024;
+
+function BolhaMensagem({ msg, souEu, onApagar }) {
+    const hora = msg.criadoEm ? new Date(msg.criadoEm).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+    return React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-3 mb-2" },
+        React.createElement("div", { className: "flex items-center justify-between mb-1" },
+            React.createElement("span", { className: "text-xs font-bold text-[#33422e]" }, msg.autorNome || "Anônimo"),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("span", { className: "text-[10px] text-stone-400" }, hora),
+                onApagar && React.createElement("button", { onClick: () => onApagar(msg.id), className: "text-stone-300" }, React.createElement(Icon, { name: "trash", size: 13 })))),
+        msg.texto ? React.createElement("p", { className: "text-sm text-stone-700 whitespace-pre-wrap break-words" }, msg.texto) : null,
+        msg.tipo === "foto" && msg.fotoBase64 ? React.createElement("img", { src: msg.fotoBase64, className: "mt-2 rounded-lg max-w-full max-h-64 object-cover" }) : null,
+        msg.tipo === "arquivo" && msg.arquivoBase64 ? React.createElement("a", { href: msg.arquivoBase64, download: msg.arquivoNome || "arquivo", className: "mt-2 flex items-center gap-2 bg-[#f2ece0] rounded-lg px-3 py-2 text-xs font-semibold text-[#33422e]" },
+            React.createElement(Icon, { name: "clipboard", size: 14 }), msg.arquivoNome || "Arquivo") : null);
+}
+
+function TelaComunidade({ onBack, meuNome, souAdmin }) {
+    const [mensagens, setMensagens] = useState([]);
+    const [carregando, setCarregando] = useState(true);
+    const [texto, setTexto] = useState("");
+    const [anexo, setAnexo] = useState(null); // { tipo: 'foto'|'arquivo', dados, nomeArquivo }
+    const [enviando, setEnviando] = useState(false);
+    const [erro, setErro] = useState("");
+    const fileInputRef = useRef(null);
+    const fimRef = useRef(null);
+
+    const carregar = async (rolarPraFim) => {
+        const msgs = await buscarMensagensComunidade(50);
+        setMensagens(msgs);
+        setCarregando(false);
+        if (rolarPraFim) setTimeout(() => { fimRef.current && fimRef.current.scrollIntoView({ behavior: "smooth" }); }, 100);
+    };
+
+    useEffect(() => {
+        carregar(true);
+        const intervalo = setInterval(() => carregar(false), 8000);
+        return () => clearInterval(intervalo);
+    }, []);
+
+    const escolherArquivo = () => fileInputRef.current && fileInputRef.current.click();
+
+    const aoEscolherArquivo = async (e) => {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = "";
+        if (!file) return;
+        setErro("");
+        try {
+            if (file.type.startsWith("image/")) {
+                const dados = await comprimirImagem(file, TAMANHO_MAX_FOTO);
+                setAnexo({ tipo: "foto", dados, nomeArquivo: file.name });
+            } else {
+                const dados = await lerArquivoComoBase64(file, TAMANHO_MAX_ARQUIVO);
+                setAnexo({ tipo: "arquivo", dados, nomeArquivo: file.name });
+            }
+        } catch (err) {
+            setErro(err.message || "Não consegui processar esse arquivo.");
+        }
+    };
+
+    const enviar = async () => {
+        if (!texto.trim() && !anexo) return;
+        setEnviando(true);
+        setErro("");
+        try {
+            await enviarMensagemComunidade({
+                texto: texto.trim() || null,
+                autorNome: meuNome,
+                tipo: anexo ? anexo.tipo : "texto",
+                fotoBase64: anexo && anexo.tipo === "foto" ? anexo.dados : null,
+                arquivoBase64: anexo && anexo.tipo === "arquivo" ? anexo.dados : null,
+                arquivoNome: anexo ? anexo.nomeArquivo : null,
+            });
+            setTexto("");
+            setAnexo(null);
+            await carregar(true);
+        } catch (e) {
+            setErro("Não foi possível enviar agora. Tente de novo.");
+        }
+        setEnviando(false);
+    };
+
+    const apagar = async (id) => {
+        setMensagens((prev) => prev.filter((m) => m.id !== id));
+        try { await apagarMensagemComunidade(id); } catch (e) {}
+    };
+
+    return React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex flex-col" },
+        React.createElement("div", { className: "bg-[#33422e] px-4 pt-5 pb-3 flex items-center gap-3 sticky top-0 z-10" },
+            React.createElement("button", { onClick: onBack, className: "text-[#cdd7c4]" }, React.createElement(Icon, { name: "chevronLeft", size: 22 })),
+            React.createElement("div", null,
+                React.createElement("h1", { className: "text-white font-bold text-base" }, "\ud83d\udcac Comunidade NutriCaf\u00e9"),
+                React.createElement("p", { className: "text-[#cdd7c4] text-xs" }, "Converse e troque experi\u00eancias com outros assinantes"))),
+        React.createElement("div", { className: "flex-1 overflow-y-auto px-3 pt-3 pb-2" },
+            carregando ? React.createElement("p", { className: "text-center text-stone-400 text-sm py-8" }, "Carregando...")
+                : mensagens.length === 0 ? React.createElement("p", { className: "text-center text-stone-400 text-sm py-8" }, "Nenhuma mensagem ainda. Seja o primeiro a puxar assunto!")
+                : mensagens.map((m) => React.createElement(BolhaMensagem, { key: m.id, msg: m, onApagar: souAdmin ? apagar : null })),
+            React.createElement("div", { ref: fimRef })),
+        anexo ? React.createElement("div", { className: "px-3 pb-1 flex items-center gap-2" },
+            React.createElement("span", { className: "text-xs bg-white rounded-full px-3 py-1.5 flex items-center gap-2 text-stone-600" },
+                anexo.tipo === "foto" ? "\ud83d\uddbc\ufe0f" : "\ud83d\udcce", " ", anexo.nomeArquivo,
+                React.createElement("button", { onClick: () => setAnexo(null), className: "text-stone-400" }, React.createElement(Icon, { name: "x", size: 12 })))) : null,
+        erro ? React.createElement("p", { className: "px-3 text-xs text-[#a8442f] pb-1" }, erro) : null,
+        React.createElement("div", { className: "bg-white border-t border-stone-200 px-3 py-2.5 flex items-center gap-2 sticky bottom-0" },
+            React.createElement("input", { ref: fileInputRef, type: "file", accept: "image/*,.pdf,.doc,.docx,.xls,.xlsx", className: "hidden", onChange: aoEscolherArquivo }),
+            React.createElement("button", { onClick: escolherArquivo, className: "text-stone-400 shrink-0 p-2" }, React.createElement(Icon, { name: "paperclip", size: 20 })),
+            React.createElement("input", { className: "flex-1 rounded-full border border-stone-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#4c6146]", placeholder: "Escreva algo...", value: texto, onChange: (e) => setTexto(e.target.value), onKeyDown: (e) => { if (e.key === "Enter") enviar(); } }),
+            React.createElement("button", { onClick: enviar, disabled: enviando || (!texto.trim() && !anexo), className: "bg-[#33422e] text-white rounded-full p-2.5 shrink-0 disabled:opacity-40" }, React.createElement(Icon, { name: "send", size: 16 }))));
+}
+
 function App() {
     const [ativado, setAtivado] = useState(ativacaoValida());
     useEffect(() => {
@@ -5252,9 +5572,10 @@ function App() {
             return;
         verificarStatusAssinaturaNaNuvem(registro.clienteId).then((info) => {
             localStorage.setItem(CHAVE_ULTIMA_CONFERENCIA, String(Date.now()));
-            if (info && info.status && info.status !== registro.status) {
-                salvarAtivacao({ ...registro, status: info.status });
-                if (info.status !== "authorized")
+            if (info && info.status) {
+                salvarAtivacao({ ...registro, status: info.status, validoAte: info.validoAte || null });
+                const expirou = info.validoAte && new Date(info.validoAte) < new Date();
+                if (info.status !== "authorized" || expirou)
                     setAtivado(false);
             }
         });
@@ -5280,8 +5601,10 @@ function App() {
     const [showCompras, setShowCompras] = useState(false);
     const [showIrrigacaoHome, setShowIrrigacaoHome] = useState(false);
     const [showCalendario, setShowCalendario] = useState(false);
+    const [showComunidade, setShowComunidade] = useState(false);
     const [permissaoNotificacao, setPermissaoNotificacao] = useState(typeof Notification !== "undefined" ? Notification.permission : "unsupported");
     const hojeISO = new Date().toISOString().slice(0, 10);
+    const meuNomeComunidade = (() => { const r = lerAtivacao(); return (r && r.nome) || "Anônimo"; })();
     const atrasados = talhoes.flatMap((t) => (agendamentos[t.id] || [])
         .filter((a) => !a.concluido && a.data < hojeISO)
         .map((a) => ({ ...a, talhaoNome: t.nome })));
@@ -5316,6 +5639,7 @@ function App() {
         : showRelatorio ? "relatorio"
         : showCompras ? "compras"
         : showCalendario ? "calendario"
+        : showComunidade ? "comunidade"
         : showCalculadoras ? "calculadoras"
         : showIrrigacaoHome ? "irrigacao"
         : selectedId ? "talhao"
@@ -5342,6 +5666,7 @@ function App() {
             if (showRelatorio) { setShowRelatorio(false); return; }
             if (showCompras) { setShowCompras(false); return; }
             if (showCalendario) { setShowCalendario(false); return; }
+            if (showComunidade) { setShowComunidade(false); return; }
             if (showCalculadoras) { setShowCalculadoras(false); return; }
             if (showIrrigacaoHome) { setShowIrrigacaoHome(false); return; }
             if (selectedId) { setSelectedId(null); return; }
@@ -5349,7 +5674,7 @@ function App() {
         };
         window.addEventListener("popstate", aoVoltar);
         return () => window.removeEventListener("popstate", aoVoltar);
-    }, [showTalhaoForm, showAjuda, showConfiguracoes, showRelatorio, showCompras, showCalendario, showCalculadoras, showIrrigacaoHome, selectedId]);
+    }, [showTalhaoForm, showAjuda, showConfiguracoes, showRelatorio, showCompras, showCalendario, showComunidade, showCalculadoras, showIrrigacaoHome, selectedId]);
     useEffect(() => {
         (async () => {
             await recarregarTudo();
@@ -5546,7 +5871,7 @@ function App() {
             onAbrirCalculadoras: () => { setShowAjuda(false); setShowCalculadoras(true); },
             onAbrirCalendario: () => { setShowAjuda(false); setShowCalendario(true); },
             onAbrirConfiguracoes: () => { setShowAjuda(false); setShowConfiguracoes(true); },
-        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, adubacoes: adubacoes, defensivos: defensivos, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" },
+        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, adubacoes: adubacoes, defensivos: defensivos, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showComunidade ? (React.createElement(TelaComunidade, { onBack: () => setShowComunidade(false), meuNome: meuNomeComunidade, souAdmin: false })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" },
             React.createElement("div", { className: "bg-gradient-to-br from-[#3d4f36] to-[#242e1f] text-white px-4 pt-6 pb-6 rounded-b-3xl shadow-lg" },
                 React.createElement("div", { className: "flex items-center justify-between" },
                     React.createElement("div", { className: "flex items-center gap-2" },
@@ -5578,7 +5903,8 @@ function App() {
                     React.createElement(AcaoTile, { icon: "clipboard", cor: "#a8442f", corFundo: "#fbe9e6", label: "Financeiro", onClick: () => setShowCompras(true) }),
                     React.createElement(AcaoTile, { icon: "calendar", cor: "#33628a", corFundo: "#e5eef5", label: "Calend\u00E1rio", onClick: () => setShowCalendario(true) }),
                     React.createElement(AcaoTile, { icon: "history", cor: "#8a6d3b", corFundo: "#f2e8d8", label: "Relat\u00F3rio", onClick: () => setShowRelatorio(true) }),
-                    React.createElement(AcaoTile, { icon: "droplet", cor: "#33628a", corFundo: "#e5eef5", label: "Irriga\u00E7\u00E3o", onClick: () => setShowIrrigacaoHome(true), full: true })),
+                    React.createElement(AcaoTile, { icon: "droplet", cor: "#33628a", corFundo: "#e5eef5", label: "Irriga\u00E7\u00E3o", onClick: () => setShowIrrigacaoHome(true), full: true }),
+                    React.createElement(AcaoTile, { icon: "chat", cor: "#8a6d3b", corFundo: "#f2e8d8", label: "Comunidade", onClick: () => setShowComunidade(true), full: true })),
                 (() => {
                     // Aviso de estoque na tela inicial: só aparece quando tem
                     // produto acabando ou zerado, pra não poluir sem motivo
