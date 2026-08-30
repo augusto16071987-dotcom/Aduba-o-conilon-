@@ -23,22 +23,29 @@ function firestoreDocUrl(docId) {
 
 async function salvarStatusAssinatura(clienteId, preapproval) {
     const docId = ("assinatura--" + clienteId).replace(/[^a-zA-Z0-9_-]/g, "_");
+    // O "reason" vem como "Assinatura NutriCafé — Nome Do Cliente" — extrai
+    // só o nome pra manter o registro localizável por nome no painel de suporte.
+    let nome = "";
+    if (preapproval.reason && preapproval.reason.indexOf("—") !== -1) {
+        nome = preapproval.reason.split("—").slice(1).join("—").trim();
+    }
     const campos = {
         status: { stringValue: preapproval.status || "" },
         preapprovalId: { stringValue: preapproval.id || "" },
         email: { stringValue: preapproval.payer_email || "" },
         atualizadoEm: { stringValue: new Date().toISOString() },
     };
-    await fetch(
-        firestoreDocUrl(docId) +
-            "?updateMask.fieldPaths=status&updateMask.fieldPaths=preapprovalId" +
-            "&updateMask.fieldPaths=email&updateMask.fieldPaths=atualizadoEm",
-        {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fields: campos }),
-        }
-    );
+    let mask = "?updateMask.fieldPaths=status&updateMask.fieldPaths=preapprovalId" +
+        "&updateMask.fieldPaths=email&updateMask.fieldPaths=atualizadoEm";
+    if (nome) {
+        campos.nome = { stringValue: nome };
+        mask += "&updateMask.fieldPaths=nome";
+    }
+    await fetch(firestoreDocUrl(docId) + mask, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields: campos }),
+    });
 }
 
 exports.handler = async (event) => {
