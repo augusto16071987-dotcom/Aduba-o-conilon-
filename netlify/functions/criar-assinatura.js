@@ -48,7 +48,6 @@ exports.handler = async (event) => {
                 external_reference: clienteId,
                 payer_email: email,
                 back_url: siteUrl + "/?assinatura=voltou",
-                status: "pending",
             }),
         });
 
