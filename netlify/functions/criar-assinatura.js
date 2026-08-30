@@ -26,6 +26,44 @@ const PLANO = {
     free_trial_frequency_type: "days",
 };
 
+const FIREBASE_PROJECT_ID = "backup-bb0d9";
+const FIRESTORE_COLECAO = "nutricafe_dados";
+
+function firestoreDocUrl(docId) {
+    return "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
+        "/databases/(default)/documents/" + FIRESTORE_COLECAO + "/" + docId;
+}
+
+// Salva um registro na nuvem assim que a assinatura é criada (mesmo que o
+// cliente ainda não tenha cadastrado o cartão). Isso garante que o nome
+// dele já fique disponível pra localização manual no painel de suporte,
+// mesmo que ele desista do checkout do Mercado Pago.
+async function salvarRegistroInicial(clienteId, nome, email, preapprovalId) {
+    const docId = ("assinatura--" + clienteId).replace(/[^a-zA-Z0-9_-]/g, "_");
+    const campos = {
+        status: { stringValue: "pending" },
+        preapprovalId: { stringValue: preapprovalId || "" },
+        email: { stringValue: email || "" },
+        nome: { stringValue: nome || "" },
+        atualizadoEm: { stringValue: new Date().toISOString() },
+    };
+    try {
+        await fetch(
+            firestoreDocUrl(docId) +
+                "?updateMask.fieldPaths=status&updateMask.fieldPaths=preapprovalId" +
+                "&updateMask.fieldPaths=email&updateMask.fieldPaths=nome&updateMask.fieldPaths=atualizadoEm",
+            {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ fields: campos }),
+            }
+        );
+    } catch (e) {
+        // Não deixa isso quebrar a criação da assinatura — é só um registro auxiliar.
+        console.error("Falha ao salvar registro inicial:", e);
+    }
+}
+
 exports.handler = async (event) => {
     if (event.httpMethod !== "POST") {
         return { statusCode: 405, body: JSON.stringify({ erro: "Método não permitido" }) };
@@ -83,6 +121,8 @@ exports.handler = async (event) => {
                 body: JSON.stringify({ erro: dados.message || "O Mercado Pago recusou o pedido.", detalhes: dados }),
             };
         }
+
+        await salvarRegistroInicial(clienteId, nome, email, dados.id);
 
         return {
             statusCode: 200,
