@@ -5880,6 +5880,8 @@ function App() {
                     React.createElement("div", { className: "flex items-center gap-3" },
                         React.createElement("button", { onClick: () => setShowAjuda(true), className: "text-[#cdd7c4] flex items-center gap-1 text-xs font-semibold border border-[#5c6b52] rounded-full px-2.5 py-1", "aria-label": "Ajuda" },
                             "?", " Ajuda"),
+                        React.createElement("button", { onClick: () => setShowComunidade(true), className: "text-[#cdd7c4]", "aria-label": "Comunidade" },
+                            React.createElement(Icon, { name: "chat", size: 20 })),
                         React.createElement("button", { onClick: () => setShowConfiguracoes(true), className: "text-[#cdd7c4]", "aria-label": "Configura\u00E7\u00F5es" },
                             React.createElement(Icon, { name: "settings", size: 20 })))),
                 React.createElement("p", { className: "text-[#cdd7c4] text-sm mt-1" }, "Controle de talh\u00F5es, an\u00E1lises, pragas e aduba\u00E7\u00E3o da sua lavoura")),
@@ -5903,8 +5905,7 @@ function App() {
                     React.createElement(AcaoTile, { icon: "clipboard", cor: "#a8442f", corFundo: "#fbe9e6", label: "Financeiro", onClick: () => setShowCompras(true) }),
                     React.createElement(AcaoTile, { icon: "calendar", cor: "#33628a", corFundo: "#e5eef5", label: "Calend\u00E1rio", onClick: () => setShowCalendario(true) }),
                     React.createElement(AcaoTile, { icon: "history", cor: "#8a6d3b", corFundo: "#f2e8d8", label: "Relat\u00F3rio", onClick: () => setShowRelatorio(true) }),
-                    React.createElement(AcaoTile, { icon: "droplet", cor: "#33628a", corFundo: "#e5eef5", label: "Irriga\u00E7\u00E3o", onClick: () => setShowIrrigacaoHome(true), full: true }),
-                    React.createElement(AcaoTile, { icon: "chat", cor: "#8a6d3b", corFundo: "#f2e8d8", label: "Comunidade", onClick: () => setShowComunidade(true), full: true })),
+                    React.createElement(AcaoTile, { icon: "droplet", cor: "#33628a", corFundo: "#e5eef5", label: "Irriga\u00E7\u00E3o", onClick: () => setShowIrrigacaoHome(true), full: true })),
                 (() => {
                     // Aviso de estoque na tela inicial: só aparece quando tem
                     // produto acabando ou zerado, pra não poluir sem motivo
