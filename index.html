@@ -910,7 +910,12 @@ async function enviarMensagemComunidade({ texto, autorNome, tipo, fotoBase64, ar
 }
 
 async function apagarMensagemComunidade(id) {
-    await fetch(comunidadeUrl("/" + id), { method: "DELETE" });
+    const res = await fetch("/.netlify/functions/apagar-mensagem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ senha: SUPORTE_SENHA, id }),
+    });
+    if (!res.ok) throw new Error("Falha ao apagar mensagem");
 }
 
 // Comprime uma imagem no navegador (reduzindo qualidade/tamanho) até caber
