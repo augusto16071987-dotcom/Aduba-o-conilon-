@@ -21,6 +21,42 @@ function firestoreDocUrl(docId) {
         "/databases/(default)/documents/" + FIRESTORE_COLECAO + "/" + docId;
 }
 
+const crypto = require("crypto");
+function base64url(input) {
+    return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Gera um token de acesso "de servidor" a partir da chave de serviço do
+// Firebase (variável de ambiente FIREBASE_SERVICE_ACCOUNT). Esse token
+// ignora as regras de segurança do Firestore — só o servidor consegue
+// gerar ele, porque só o servidor tem a chave privada.
+async function obterTokenAdmin() {
+    const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    const agora = Math.floor(Date.now() / 1000);
+    const header = { alg: "RS256", typ: "JWT" };
+    const claim = {
+        iss: sa.client_email,
+        scope: "https://www.googleapis.com/auth/datastore",
+        aud: "https://oauth2.googleapis.com/token",
+        exp: agora + 3600,
+        iat: agora,
+    };
+    const semAssinar = base64url(JSON.stringify(header)) + "." + base64url(JSON.stringify(claim));
+    const assinador = crypto.createSign("RSA-SHA256");
+    assinador.update(semAssinar);
+    assinador.end();
+    const assinatura = assinador.sign(sa.private_key).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const jwt = semAssinar + "." + assinatura;
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=" + encodeURIComponent(jwt),
+    });
+    const dados = await res.json();
+    if (!dados.access_token) throw new Error("Não consegui autenticar com o Firebase (admin).");
+    return dados.access_token;
+}
+
 async function salvarStatusAssinatura(clienteId, preapproval) {
     const docId = ("assinatura--" + clienteId).replace(/[^a-zA-Z0-9_-]/g, "_");
     // O "reason" vem como "Assinatura NutriCafé — Nome Do Cliente" — extrai
@@ -41,9 +77,10 @@ async function salvarStatusAssinatura(clienteId, preapproval) {
         campos.nome = { stringValue: nome };
         mask += "&updateMask.fieldPaths=nome";
     }
+    const token = await obterTokenAdmin();
     await fetch(firestoreDocUrl(docId) + mask, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
         body: JSON.stringify({ fields: campos }),
     });
 }
