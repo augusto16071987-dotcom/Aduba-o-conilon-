@@ -1,24 +1,23 @@
-// netlify/functions/mp-webhook.js
+// netlify/functions/liberar-manual.js
 //
-// O Mercado Pago chama essa URL sozinho toda vez que algo muda numa
-// assinatura (nova, autorizada, pausada, cancelada, cobrança do mês).
-// A função busca os dados de verdade na API do Mercado Pago (nunca confia
-// só no que veio na notificação) e grava o status atual no Firestore, no
-// mesmo banco de dados que o app já usa pra sincronizar.
+// Uso interno (chamado pelo painel de suporte do próprio app). Recebe
+// { senha, nome, meses }, procura na nuvem um cliente cujo nome bate com
+// o texto digitado e marca a assinatura dele como "authorized" por esse
+// número de meses — sem precisar de cartão nem do Mercado Pago. Serve
+// pra casos de PIX combinado por fora, ou pra compensar algum problema
+// de cobrança.
 //
-// Configurar essa URL no painel do Mercado Pago em:
-// Suas integrações > (aplicação NutriCafe) > Webhooks
-//   URL: https://SEU-SITE.netlify.app/.netlify/functions/mp-webhook
-//   Eventos: "Assinaturas" (subscription_preapproval)
-//
-// Precisa da variável de ambiente MP_ACCESS_TOKEN configurada no Netlify.
+// A senha é a MESMA senha do painel de suporte (SUPORTE_SENHA lá no
+// index.html). Se trocar uma, troque a outra também.
+
+const SENHA_ADMIN = "cafe-suporte-2026";
 
 const FIREBASE_PROJECT_ID = "backup-bb0d9";
 const FIRESTORE_COLECAO = "nutricafe_dados";
 
-function firestoreDocUrl(docId) {
+function baseUrl() {
     return "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
-        "/databases/(default)/documents/" + FIRESTORE_COLECAO + "/" + docId;
+        "/databases/(default)/documents/" + FIRESTORE_COLECAO;
 }
 
 const crypto = require("crypto");
@@ -57,84 +56,112 @@ async function obterTokenAdmin() {
     return dados.access_token;
 }
 
-async function salvarStatusAssinatura(clienteId, preapproval) {
-    const docId = ("assinatura--" + clienteId).replace(/[^a-zA-Z0-9_-]/g, "_");
-    // O "reason" vem como "Assinatura NutriCafé — Nome Do Cliente" — extrai
-    // só o nome pra manter o registro localizável por nome no painel de suporte.
-    let nome = "";
-    if (preapproval.reason && preapproval.reason.indexOf("—") !== -1) {
-        nome = preapproval.reason.split("—").slice(1).join("—").trim();
-    }
-    const campos = {
-        status: { stringValue: preapproval.status || "" },
-        preapprovalId: { stringValue: preapproval.id || "" },
-        email: { stringValue: preapproval.payer_email || "" },
-        atualizadoEm: { stringValue: new Date().toISOString() },
-    };
-    let mask = "?updateMask.fieldPaths=status&updateMask.fieldPaths=preapprovalId" +
-        "&updateMask.fieldPaths=email&updateMask.fieldPaths=atualizadoEm";
-    if (nome) {
-        campos.nome = { stringValue: nome };
-        mask += "&updateMask.fieldPaths=nome";
-    }
-    const token = await obterTokenAdmin();
-    await fetch(firestoreDocUrl(docId) + mask, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-        body: JSON.stringify({ fields: campos }),
-    });
+function normalizar(txt) {
+    return (txt || "")
+        .toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove acentos
+        .trim();
+}
+
+async function listarRegistrosDeAssinatura() {
+    const registros = [];
+    let pageToken = null;
+    do {
+        const url = baseUrl() + "?pageSize=300" + (pageToken ? "&pageToken=" + pageToken : "");
+        const res = await fetch(url);
+        const json = await res.json();
+        for (const doc of json.documents || []) {
+            const nomeDoc = doc.name.split("/").pop();
+            if (nomeDoc.indexOf("assinatura--") !== 0) continue;
+            const f = doc.fields || {};
+            registros.push({
+                docId: nomeDoc,
+                clienteId: nomeDoc.replace(/^assinatura--/, ""),
+                nome: f.nome ? f.nome.stringValue : "",
+                email: f.email ? f.email.stringValue : "",
+                status: f.status ? f.status.stringValue : "",
+            });
+        }
+        pageToken = json.nextPageToken || null;
+    } while (pageToken);
+    return registros;
 }
 
 exports.handler = async (event) => {
-    const ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
+    if (event.httpMethod !== "POST") {
+        return { statusCode: 405, body: JSON.stringify({ erro: "Método não permitido" }) };
+    }
 
-    // Sempre respondemos 200 pro Mercado Pago não ficar tentando de novo
-    // em loop — qualquer problema aqui é só logado, nunca vira erro pra ele.
-    const ok = { statusCode: 200, body: "ok" };
-    if (!ACCESS_TOKEN) {
-        console.error("MP_ACCESS_TOKEN não configurado");
-        return ok;
+    let corpo;
+    try {
+        corpo = JSON.parse(event.body || "{}");
+    } catch (e) {
+        return { statusCode: 400, body: JSON.stringify({ erro: "Corpo da requisição inválido." }) };
+    }
+
+    const { senha, nome, meses } = corpo;
+    if (senha !== SENHA_ADMIN) {
+        return { statusCode: 401, body: JSON.stringify({ erro: "Senha incorreta." }) };
+    }
+    if (!nome || !nome.trim()) {
+        return { statusCode: 400, body: JSON.stringify({ erro: "Digite o nome do cliente." }) };
+    }
+    const numMeses = Number(meses);
+    if (!numMeses || numMeses <= 0) {
+        return { statusCode: 400, body: JSON.stringify({ erro: "Número de meses inválido." }) };
     }
 
     try {
-        let preapprovalId = null;
+        const registros = await listarRegistrosDeAssinatura();
+        const busca = normalizar(nome);
+        const encontrados = registros.filter((r) => normalizar(r.nome).indexOf(busca) !== -1);
 
-        // Formato novo (o mais comum): POST com corpo JSON
-        if (event.body) {
-            try {
-                const corpo = JSON.parse(event.body);
-                if (corpo && corpo.data && corpo.data.id &&
-                    (corpo.type === "subscription_preapproval" || corpo.type === "preapproval")) {
-                    preapprovalId = corpo.data.id;
-                }
-            } catch (e) {
-                // corpo não era JSON — segue pra tentar pela query string
-            }
+        if (encontrados.length === 0) {
+            return {
+                statusCode: 404,
+                body: JSON.stringify({ erro: "Nenhum cliente encontrado com esse nome. Ele precisa ter aberto a tela de assinatura no app pelo menos uma vez." }),
+            };
+        }
+        if (encontrados.length > 1) {
+            return {
+                statusCode: 409,
+                body: JSON.stringify({
+                    erro: "Mais de um cliente encontrado. Seja mais específico.",
+                    opcoes: encontrados.map((r) => ({ nome: r.nome, email: r.email })),
+                }),
+            };
         }
 
-        // Formato antigo (IPN): vem como parâmetros na URL
-        const params = event.queryStringParameters || {};
-        if (!preapprovalId && params.id && (params.topic === "preapproval" || params.type === "preapproval")) {
-            preapprovalId = params.id;
-        }
+        const alvo = encontrados[0];
+        const validoAte = new Date();
+        validoAte.setMonth(validoAte.getMonth() + numMeses);
 
-        if (!preapprovalId) {
-            // Notificação de outro tipo (ex: pagamento avulso da fatura mensal) —
-            // não precisamos fazer nada, o status do preapproval já reflete tudo.
-            return ok;
-        }
+        const campos = {
+            status: { stringValue: "authorized" },
+            liberadoManualmente: { booleanValue: true },
+            validoAte: { stringValue: validoAte.toISOString() },
+            atualizadoEm: { stringValue: new Date().toISOString() },
+        };
+        const mask = "?updateMask.fieldPaths=status&updateMask.fieldPaths=liberadoManualmente" +
+            "&updateMask.fieldPaths=validoAte&updateMask.fieldPaths=atualizadoEm";
 
-        const resposta = await fetch("https://api.mercadopago.com/preapproval/" + preapprovalId, {
-            headers: { "Authorization": "Bearer " + ACCESS_TOKEN },
+        const token = await obterTokenAdmin();
+        await fetch(baseUrl() + "/" + alvo.docId + mask, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+            body: JSON.stringify({ fields: campos }),
         });
-        const preapproval = await resposta.json();
 
-        if (resposta.ok && preapproval.external_reference) {
-            await salvarStatusAssinatura(preapproval.external_reference, preapproval);
-        }
+        return {
+            statusCode: 200,
+            body: JSON.stringify({
+                ok: true,
+                nome: alvo.nome,
+                email: alvo.email,
+                validoAte: validoAte.toISOString(),
+            }),
+        };
     } catch (e) {
-        console.error("Erro no webhook do Mercado Pago:", e);
+        return { statusCode: 500, body: JSON.stringify({ erro: "Erro interno ao liberar.", detalhes: String(e) }) };
     }
-
-    return ok;
 };
