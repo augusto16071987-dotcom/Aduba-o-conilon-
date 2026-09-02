@@ -2579,13 +2579,13 @@ function calcularFinanceiro(adubacoes, defensivos, receitas, despesas) {
    foi aplicado (adubações + defensivos, somando todos os talhões). Devolve
    uma lista por produto, em kg ou L. Registros de irrigação são ignorados,
    já que não consomem produto. */
-function calcularEstoque(compras, adubacoesPorTalhao, defensivosPorTalhao, despesasPorTalhao, talhoes) {
+function calcularEstoque(compras, adubacoesPorTalhao, defensivosPorTalhao, despesasPorTalhao, talhoes, agendamentosPorTalhao) {
     const porProduto = {};
     const chave = (nome) => (nome || "").trim().toLowerCase();
     const garantir = (nome, categoria) => {
         const k = chave(nome);
         if (!porProduto[k]) {
-            porProduto[k] = { produto: (nome || "").trim(), categoria: categoria || "", comprado: 0, aplicado: 0, unidade: "kg", precoPorBase: null, ultimaCompra: null };
+            porProduto[k] = { produto: (nome || "").trim(), categoria: categoria || "", comprado: 0, aplicado: 0, reservado: 0, unidade: "kg", precoPorBase: null, ultimaCompra: null };
         }
         return porProduto[k];
     };
@@ -2626,6 +2626,14 @@ function calcularEstoque(compras, adubacoesPorTalhao, defensivosPorTalhao, despe
             const base = un === "mL" || un === "g" ? Number(d.quantidadeProduto) / 1000 : Number(d.quantidadeProduto);
             garantir(d.descricao).aplicado += base;
         });
+        // reservado: agendamentos ainda não concluídos, com quantidade prevista
+        // informada — "separa" essa quantidade do saldo, como uma sombra.
+        ((agendamentosPorTalhao || {})[t.id] || []).forEach((a) => {
+            if (a.concluido || !a.produto || !a.quantidade) return;
+            const kg = quantidadeEmKg(a, area);
+            if (kg == null) return;
+            garantir(a.produto).reservado += kg;
+        });
     });
     return Object.values(porProduto)
         .map((i) => ({ ...i, saldo: i.comprado - i.aplicado }))
@@ -2638,6 +2646,11 @@ function statusEstoque(item) {
     if (item.saldo <= 0.001) return "acabou";
     if (item.saldo / item.comprado <= 0.2) return "baixo";
     return "ok";
+}
+// Além do status normal (acabou/baixo), também chama atenção quando o
+// saldo não é suficiente pra cobrir tudo que já está agendado.
+function precisaAtencaoEstoque(item) {
+    return statusEstoque(item) !== "ok" || (item.reservado > 0 && item.reservado - item.saldo > 0.001);
 }
 function paraUnidadeBase(quantidade, unidade, pesoSaco) {
     const q = Number(quantidade) || 0;
@@ -3567,10 +3580,11 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
     const [forma, setForma] = useState(initial ? initial.forma : "solo");
     const [produto, setProduto] = useState(initial ? initial.produto : "");
     const [obs, setObs] = useState(initial ? initial.obs || "" : "");
-    // Quantidade prevista é opcional — só serve pra alimentar a "previsão"
-    // (sombra) na barra de Meta x aplicado. Se ficar em branco, o agendamento
-    // não entra nessa previsão, mas continua funcionando normalmente.
-    const ehAdubacao = forma === "solo" || forma === "foliar" || forma === "fertirrigacao";
+    // Quantidade prevista é opcional — alimenta a "previsão" (sombra) na
+    // barra de Meta x aplicado (só faz sentido pra adubação) E a "reserva"
+    // de estoque (faz sentido pra qualquer produto, incluindo defensivo).
+    // Se ficar em branco, o agendamento não entra em nenhuma das duas.
+    const temProduto = forma !== "irrigacao";
     const [quantidadePrevista, setQuantidadePrevista] = useState(initial ? (initial.quantidade != null ? String(initial.quantidade) : "") : "");
     const [unidadePrevista, setUnidadePrevista] = useState(initial ? (initial.unidade || "kg") : "kg");
     const [pesoSacoRefPrevisto, setPesoSacoRefPrevisto] = useState(initial && initial.pesoSacoRef != null ? initial.pesoSacoRef : 50);
@@ -3592,7 +3606,7 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
     const valido = data && (forma === "irrigacao" || produto.trim()) && (todosOsTalhoes ? talhoes.length > 0 : talhaoId);
     const montarDados = (extra) => {
         const base = { data, forma, produto: produto.trim(), obs: obs.trim(), ...extra };
-        if (ehAdubacao && quantidadePrevista) {
+        if (temProduto && quantidadePrevista) {
             base.quantidade = Number(quantidadePrevista);
             base.unidade = unidadePrevista;
             base.pesoSacoRef = pesoSacoRefPrevisto;
@@ -3613,8 +3627,8 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
         React.createElement(Field, { label: "Forma de aplica\u00E7\u00E3o" },
             React.createElement(ChoiceRow, { options: FORMAS_APLICACAO, value: forma, onChange: setForma, cols: 3 })),
         forma !== "irrigacao" && (React.createElement(Field, { label: "Produto (do estoque)" },
-            React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: forma === "defensivo" ? ["Defensivo", "Herbicida"] : "todos", value: produto, onChange: setProduto, onProdutoSelecionado: ehAdubacao ? aoEscolherProdutoPrevisto : undefined }))),
-        ehAdubacao && (React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: forma === "defensivo" ? ["Defensivo", "Herbicida"] : "todos", value: produto, onChange: setProduto, onProdutoSelecionado: temProduto ? aoEscolherProdutoPrevisto : undefined }))),
+        temProduto && (React.createElement("div", { className: "grid grid-cols-2 gap-3" },
             React.createElement(Field, { label: "Quantidade prevista (opcional)" },
                 React.createElement(NumInput, { placeholder: "Ex: 5", value: quantidadePrevista, onChange: (e) => setQuantidadePrevista(e.target.value) })),
             React.createElement(Field, { label: "Unidade" },
@@ -3623,8 +3637,8 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
                     React.createElement("option", { value: "kg/ha" }, "kg/ha"),
                     React.createElement("option", { value: "sacos" }, "sacos"),
                     React.createElement("option", { value: "L" }, "litros"))))),
-        ehAdubacao && (React.createElement("p", { className: "text-[11px] text-stone-400 -mt-2 mb-3" },
-            "Se informar, esse agendamento entra na previs\u00E3o (sombra) da barra de Meta x aplicado, at\u00E9 voc\u00EA marcar como conclu\u00EDdo.")),
+        temProduto && (React.createElement("p", { className: "text-[11px] text-stone-400 -mt-2 mb-3" },
+            "Se informar, esse agendamento entra na previs\u00E3o (sombra) da barra de Meta x aplicado e reserva a quantidade no estoque, at\u00E9 voc\u00EA marcar como conclu\u00EDdo.")),
         React.createElement(Field, { label: "Observa\u00E7\u00F5es" },
             React.createElement("textarea", { className: inputCls, rows: 2, placeholder: "Ex: aplicar cedo, antes da chuva...", value: obs, onChange: (e) => setObs(e.target.value) })),
         React.createElement(PrimaryBtn, { disabled: !valido, onClick: () => onSave(todosOsTalhoes
@@ -3899,13 +3913,13 @@ function EditarIrrigacaoForm({ initial, onClose, onSave }) {
             React.createElement(Icon, { name: "check", size: 18 }),
             " Salvar altera\u00E7\u00F5es")));
 }
-function ComprasScreen({ compras, adubacoes, defensivos, despesas, talhoes, onAdd, onUpdate, onDelete, receitas, onAddReceita, onAddReceitaEmLote, onUpdateReceita, onDeleteReceita, onAddDespesaEmLote, onBack }) {
+function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos, talhoes, onAdd, onUpdate, onDelete, receitas, onAddReceita, onAddReceitaEmLote, onUpdateReceita, onDeleteReceita, onAddDespesaEmLote, onBack }) {
     const [showForm, setShowForm] = useState(false);
     const [editando, setEditando] = useState(null);
     const [showReceitaForm, setShowReceitaForm] = useState(false);
     const [editReceita, setEditReceita] = useState(null);
     const [aba, setAba] = useState("compras");
-    const estoque = calcularEstoque(compras, adubacoes, defensivos, despesas, talhoes);
+    const estoque = calcularEstoque(compras, adubacoes, defensivos, despesas, talhoes, agendamentos);
     const [categoriaFiltroEstoque, setCategoriaFiltroEstoque] = useState("todas");
     const estoqueFiltrado = categoriaFiltroEstoque === "todas" ? estoque : estoque.filter((i) => i.categoria === categoriaFiltroEstoque);
     const anoAtual = new Date().getFullYear();
@@ -3939,8 +3953,8 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, talhoes, onAd
             React.createElement("div", { className: "grid grid-cols-3 gap-2" },
                 [["compras", "Compras"], ["estoque", "Estoque"], ["financeiro", "Receitas"]].map(([k, l]) => (React.createElement("button", { key: k, onClick: () => setAba(k), className: `py-2 rounded-lg text-[11px] leading-tight font-semibold border ${aba === k ? "bg-[#33422e] text-white border-[#33422e]" : "bg-white text-stone-600 border-stone-300"}` },
                     l,
-                    k === "estoque" && estoque.filter((i) => statusEstoque(i) !== "ok").length > 0
-                        ? React.createElement("span", { className: "ml-1 inline-block px-1.5 rounded-full bg-[#a8442f] text-white text-[10px]" }, estoque.filter((i) => statusEstoque(i) !== "ok").length)
+                    k === "estoque" && estoque.filter((i) => precisaAtencaoEstoque(i)).length > 0
+                        ? React.createElement("span", { className: "ml-1 inline-block px-1.5 rounded-full bg-[#a8442f] text-white text-[10px]" }, estoque.filter((i) => precisaAtencaoEstoque(i)).length)
                         : null)))),
             aba === "estoque" ? (React.createElement(React.Fragment, null,
                 estoque.length === 0 && React.createElement("p", { className: "text-center text-stone-400 text-sm py-8" }, "Nenhum produto comprado ainda."),
@@ -3952,26 +3966,36 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, talhoes, onAd
                             if (qtd === 0) return null;
                             return React.createElement("option", { key: cat, value: cat }, cat, " (", qtd, ")");
                         })))),
-                estoqueFiltrado.filter((i) => statusEstoque(i) !== "ok").length > 0 && (React.createElement("div", { className: "bg-[#fdf0e6] border border-[#f0d5c4] rounded-xl p-3" },
+                estoqueFiltrado.filter((i) => precisaAtencaoEstoque(i)).length > 0 && (React.createElement("div", { className: "bg-[#fdf0e6] border border-[#f0d5c4] rounded-xl p-3" },
                     React.createElement("p", { className: "text-xs font-bold text-[#a8442f] mb-1" }, "\u26A0 Aten\u00E7\u00E3o ao estoque"),
-                    estoqueFiltrado.filter((i) => statusEstoque(i) !== "ok").map((i) => (React.createElement("p", { key: i.produto, className: "text-xs text-[#8a3a29]" },
-                        statusEstoque(i) === "acabou" ? "\u2022 " + i.produto + " \u2014 acabou" : "\u2022 " + i.produto + " \u2014 restam s\u00F3 " + fmtBR(i.saldo, 1) + " " + i.unidade))))),
+                    estoqueFiltrado.filter((i) => precisaAtencaoEstoque(i)).map((i) => {
+                        const faltante = i.reservado - i.saldo;
+                        const msg = statusEstoque(i) === "acabou" ? "acabou" : statusEstoque(i) === "baixo" ? "restam s\u00F3 " + fmtBR(i.saldo, 1) + " " + i.unidade : "falta " + fmtBR(faltante, 1) + " " + i.unidade + " pra cobrir o que est\u00E1 agendado";
+                        return React.createElement("p", { key: i.produto, className: "text-xs text-[#8a3a29]" }, "\u2022 " + i.produto + " \u2014 " + msg);
+                    }))),
                 estoqueFiltrado.length === 0 && estoque.length > 0 && React.createElement("p", { className: "text-center text-stone-400 text-sm py-6" }, "Nenhum produto nessa categoria."),
                 estoqueFiltrado.map((i) => {
                     const st = statusEstoque(i);
                     const cor = st === "acabou" ? "#a8442f" : st === "baixo" ? "#c98a2c" : "#4c6146";
-                    const pct = i.comprado > 0 ? Math.max(0, Math.min(100, (i.saldo / i.comprado) * 100)) : 0;
+                    const reservadoEfetivo = Math.max(0, Math.min(i.saldo, i.reservado));
+                    const pctLivre = i.comprado > 0 ? Math.max(0, Math.min(100, ((i.saldo - reservadoEfetivo) / i.comprado) * 100)) : 0;
+                    const pctReservado = i.comprado > 0 ? Math.max(0, Math.min(100, (reservadoEfetivo / i.comprado) * 100)) : 0;
+                    const faltante = i.reservado - i.saldo;
                     return React.createElement("div", { key: i.produto, className: "bg-white rounded-2xl shadow-sm p-3" },
                         React.createElement("div", { className: "flex items-center justify-between gap-2" },
                             React.createElement("span", { className: "font-semibold text-stone-800 text-sm" }, i.produto),
                             React.createElement("span", { className: "text-sm font-bold shrink-0", style: { color: cor } },
                                 fmtBR(Math.max(0, i.saldo), 1), " ", i.unidade)),
-                        React.createElement("div", { className: "w-full h-1.5 bg-stone-100 rounded-full mt-2 overflow-hidden" },
-                            React.createElement("div", { className: "h-full rounded-full", style: { width: pct + "%", backgroundColor: cor } })),
+                        React.createElement("div", { className: "w-full h-1.5 bg-stone-100 rounded-full mt-2 overflow-hidden flex" },
+                            React.createElement("div", { className: "h-full", style: { width: pctLivre + "%", backgroundColor: cor } }),
+                            i.reservado > 0 && React.createElement("div", { className: "h-full opacity-40", style: { width: pctReservado + "%", backgroundColor: cor } })),
                         React.createElement("p", { className: "text-[11px] text-stone-400 mt-1.5" },
                             "Comprado ", fmtBR(i.comprado, 1), " ", i.unidade,
                             " \u00B7 aplicado ", fmtBR(i.aplicado, 1), " ", i.unidade,
                             i.categoria ? " \u00B7 " + i.categoria : ""),
+                        i.reservado > 0 && React.createElement("p", { className: "text-[11px] mt-0.5", style: { color: faltante > 0.001 ? "#a8442f" : "#8a8577" } },
+                            fmtBR(i.reservado, 1), " ", i.unidade, " reservado p/ agendamentos pendentes",
+                            faltante > 0.001 ? (" \u2014 falta " + fmtBR(faltante, 1) + " " + i.unidade) : ""),
                         st === "acabou" && React.createElement("p", { className: "text-[11px] font-semibold text-[#a8442f] mt-0.5" }, "Estoque zerado \u2014 compre mais antes da pr\u00F3xima aplica\u00E7\u00E3o"),
                         st === "baixo" && React.createElement("p", { className: "text-[11px] font-semibold text-[#c98a2c] mt-0.5" }, "Estoque baixo"));
                 }),
@@ -5438,6 +5462,7 @@ function TelaSuporte() {
                 adubacoes: dados.adubacoes,
                 defensivos: dados.defensivos,
                 despesas: dados.despesas,
+                agendamentos: dados.agendamentos,
                 talhoes: dados.talhoes,
                 onAdd: noop, onUpdate: noop, onDelete: noop,
                 receitas: dados.receitas,
@@ -5932,7 +5957,7 @@ function App() {
             onAbrirCalculadoras: () => { setShowAjuda(false); setShowCalculadoras(true); },
             onAbrirCalendario: () => { setShowAjuda(false); setShowCalendario(true); },
             onAbrirConfiguracoes: () => { setShowAjuda(false); setShowConfiguracoes(true); },
-        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, adubacoes: adubacoes, defensivos: defensivos, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showComunidade ? (React.createElement(TelaComunidade, { onBack: () => setShowComunidade(false), meuNome: meuNomeComunidade, souAdmin: false })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], agendamentos: agendamentos[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" },
+        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, adubacoes: adubacoes, defensivos: defensivos, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showComunidade ? (React.createElement(TelaComunidade, { onBack: () => setShowComunidade(false), meuNome: meuNomeComunidade, souAdmin: false })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], agendamentos: agendamentos[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" },
             React.createElement("div", { className: "bg-gradient-to-br from-[#3d4f36] to-[#242e1f] text-white px-4 pt-6 pb-6 rounded-b-3xl shadow-lg" },
                 React.createElement("div", { className: "flex items-center justify-between" },
                     React.createElement("div", { className: "flex items-center gap-2" },
@@ -5969,15 +5994,20 @@ function App() {
                     React.createElement(AcaoTile, { icon: "droplet", cor: "#33628a", corFundo: "#e5eef5", label: "Irriga\u00E7\u00E3o", onClick: () => setShowIrrigacaoHome(true), full: true })),
                 (() => {
                     // Aviso de estoque na tela inicial: só aparece quando tem
-                    // produto acabando ou zerado, pra não poluir sem motivo
-                    const alertas = calcularEstoque(compras, adubacoes, defensivos, despesas, talhoes).filter((i) => statusEstoque(i) !== "ok");
+                    // produto acabando, zerado, ou insuficiente pro que já
+                    // está agendado — pra não poluir sem motivo
+                    const alertas = calcularEstoque(compras, adubacoes, defensivos, despesas, talhoes, agendamentos).filter((i) => precisaAtencaoEstoque(i));
                     if (alertas.length === 0) return null;
+                    const msgDoItem = (i) => {
+                        if (statusEstoque(i) === "acabou") return "\u2022 " + i.produto + " \u2014 acabou";
+                        if (statusEstoque(i) === "baixo") return "\u2022 " + i.produto + " \u2014 restam " + fmtBR(i.saldo, 1) + " " + i.unidade;
+                        return "\u2022 " + i.produto + " \u2014 falta " + fmtBR(i.reservado - i.saldo, 1) + " " + i.unidade + " p/ o agendado";
+                    };
                     return React.createElement("button", { onClick: () => setShowCompras(true), className: "w-full text-left bg-[#fdf0e6] border border-[#f0d5c4] rounded-2xl p-3 active:bg-[#fae5d6]" },
                         React.createElement("p", { className: "text-xs font-bold text-[#a8442f] mb-1 flex items-center gap-1" },
                             React.createElement(Icon, { name: "clipboard", size: 13 }),
                             alertas.length === 1 ? "1 produto precisa de aten\u00E7\u00E3o no estoque" : alertas.length + " produtos precisam de aten\u00E7\u00E3o no estoque"),
-                        alertas.slice(0, 3).map((i) => (React.createElement("p", { key: i.produto, className: "text-xs text-[#8a3a29]" },
-                            statusEstoque(i) === "acabou" ? "\u2022 " + i.produto + " \u2014 acabou" : "\u2022 " + i.produto + " \u2014 restam " + fmtBR(i.saldo, 1) + " " + i.unidade))),
+                        alertas.slice(0, 3).map((i) => (React.createElement("p", { key: i.produto, className: "text-xs text-[#8a3a29]" }, msgDoItem(i)))),
                         alertas.length > 3 && React.createElement("p", { className: "text-xs text-[#8a3a29]" }, "\u2022 e mais ", alertas.length - 3, "..."),
                         React.createElement("p", { className: "text-[11px] text-[#a8442f] mt-1 font-semibold" }, "Toque para ver o estoque \u2192"));
                 })(),
