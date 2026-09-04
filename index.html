@@ -1759,46 +1759,43 @@ function AdubacaoForm({ onSave, onClose, initial, compras, talhao, talhoes, pref
     // concluído, o formulário abre já com data/produto preenchidos, faltando
     // só a quantidade — mas continua sendo um registro NOVO, não uma edição.
     const [data, setData] = useState(initial ? initial.data : (prefill && prefill.data) || new Date().toISOString().slice(0, 10));
-    const [produto, setProduto] = useState(initial ? initial.produto : (prefill && prefill.produto) || "");
-    const [formulacao, setFormulacao] = useState(initial ? initial.formulacao || "" : "");
-    const [quantidade, setQuantidade] = useState(initial ? String(initial.quantidade) : "");
-    const [unidade, setUnidade] = useState(initial ? initial.unidade : "kg");
+    const novoItem = () => ({ chave: uid(), produto: "", formulacao: "", quantidade: "", unidade: "kg", pesoSacoRef: 50, nutrientes: { n: "", p2o5: "", k2o: "", s: "", zn: "", cu: "", mn: "", b: "", mg: "" } });
+    const [itens, setItens] = useState(() => {
+        const base = novoItem();
+        if (initial) {
+            base.produto = initial.produto || "";
+            base.formulacao = initial.formulacao || "";
+            base.quantidade = initial.quantidade != null ? String(initial.quantidade) : "";
+            base.unidade = initial.unidade || "kg";
+            base.pesoSacoRef = initial.pesoSacoRef != null ? initial.pesoSacoRef : 50;
+            NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => { base.nutrientes[nu.key] = initial[nu.key] != null ? String(initial[nu.key]) : ""; });
+        }
+        else if (prefill && prefill.produto) {
+            base.produto = prefill.produto;
+        }
+        return [base];
+    });
+    const atualizarItem = (i, campo, valor) => setItens((prev) => prev.map((it, idx) => idx === i ? { ...it, [campo]: valor } : it));
+    const atualizarNutrienteItem = (i, key, valor) => setItens((prev) => prev.map((it, idx) => idx === i ? { ...it, nutrientes: { ...it.nutrientes, [key]: valor } } : it));
+    const escolherProdutoItem = (i, c) => {
+        const baseMatch = BASE_PRODUTOS.find((p) => p.nome.trim().toLowerCase() === (c.produto || "").trim().toLowerCase());
+        const formulacao = c.formulacao || (baseMatch ? baseMatch.formulacao : "") || "";
+        const temNaCompra = NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).some((nu) => c[nu.key] != null);
+        const comp = temNaCompra ? c : (composicaoDoBase(c.produto) || {});
+        const nutrientes = {};
+        NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => { nutrientes[nu.key] = comp[nu.key] != null ? String(comp[nu.key]) : ""; });
+        setItens((prev) => prev.map((it, idx) => idx === i ? { ...it, formulacao, nutrientes, pesoSacoRef: c.pesoSaco || it.pesoSacoRef } : it));
+    };
+    const adicionarItem = () => setItens((prev) => [...prev, novoItem()]);
+    const removerItem = (i) => setItens((prev) => prev.filter((_, idx) => idx !== i));
     const [parcela, setParcela] = useState(initial ? initial.parcela : "1ª parcela");
-    const [custo, setCusto] = useState(initial && initial.custo != null ? String(initial.custo) : "");
-    const [pesoSacoRef, setPesoSacoRef] = useState(initial && initial.pesoSacoRef != null ? initial.pesoSacoRef : 50);
     const [obs, setObs] = useState(initial ? initial.obs || "" : "");
     const [aplicarVarios, setAplicarVarios] = useState(false);
     const [baseDoseVarios, setBaseDoseVarios] = useState("hectare");
     const [tipoMedidaVarios, setTipoMedidaVarios] = useState("kg");
     const [talhoesSelecionados, setTalhoesSelecionados] = useState(() => (talhoes || []).map((t) => t.id));
     const toggleTalhaoSelecionado = (id) => setTalhoesSelecionados((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
-    const infoPreco = precoUnitarioDoProduto(produto, compras);
-    useEffect(() => {
-        if (infoPreco && quantidade) {
-            const baseAplicada = paraUnidadeBase(quantidade, unidade, pesoSacoRef);
-            setCusto((infoPreco.precoPorBase * baseAplicada).toFixed(2));
-        }
-        else {
-            setCusto("");
-        }
-    }, [produto, quantidade, unidade, pesoSacoRef]);
-    const nutrienteInicial = (key) => (initial && initial[key] != null ? String(initial[key]) : "");
-    const [n, setN] = useState(nutrienteInicial("n"));
-    const [p2o5, setP2o5] = useState(nutrienteInicial("p2o5"));
-    const [k2o, setK2o] = useState(nutrienteInicial("k2o"));
-    const [s, setS] = useState(nutrienteInicial("s"));
-    const [zn, setZn] = useState(nutrienteInicial("zn"));
-    const [cu, setCu] = useState(nutrienteInicial("cu"));
-    const [mn, setMn] = useState(nutrienteInicial("mn"));
-    const [b, setB] = useState(nutrienteInicial("b"));
-    const [mg, setMg] = useState(nutrienteInicial("mg"));
-    const nutrientesState = { n: [n, setN], p2o5: [p2o5, setP2o5], k2o: [k2o, setK2o], s: [s, setS], zn: [zn, setZn], cu: [cu, setCu], mn: [mn, setMn], b: [b, setB], mg: [mg, setMg] };
-    const aplicarComposicao = (comp) => {
-        NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => {
-            const [, setter] = nutrientesState[nu.key];
-            setter(comp && comp[nu.key] != null ? String(comp[nu.key]) : "");
-        });
-    };
+    const unidadeVarios = `${tipoMedidaVarios}/${baseDoseVarios === "planta" ? "planta" : "ha"}`;
     // Quando o formulário abre já com um produto (caso do agendamento marcado
     // como concluído), busca a composição/formulação do estoque na hora — do
     // mesmo jeito que aconteceria se o usuário tivesse escolhido na lista.
@@ -1810,127 +1807,141 @@ function AdubacaoForm({ onSave, onClose, initial, compras, talhao, talhoes, pref
             .sort((a, b) => (a.data < b.data ? 1 : -1))[0];
         const baseMatch = BASE_PRODUTOS.find((p) => p.nome.trim().toLowerCase() === alvo);
         if (daCompra) {
-            setFormulacao(daCompra.formulacao || (baseMatch ? baseMatch.formulacao : "") || "");
+            const formulacao = daCompra.formulacao || (baseMatch ? baseMatch.formulacao : "") || "";
             const temNaCompra = NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).some((nu) => daCompra[nu.key] != null);
-            aplicarComposicao(temNaCompra ? daCompra : composicaoDoBase(prefill.produto) || {});
-            if (daCompra.pesoSaco) setPesoSacoRef(daCompra.pesoSaco);
+            const comp = temNaCompra ? daCompra : (composicaoDoBase(prefill.produto) || {});
+            const nutrientes = {};
+            NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => { nutrientes[nu.key] = comp[nu.key] != null ? String(comp[nu.key]) : ""; });
+            setItens((prev) => prev.map((it, idx) => idx === 0 ? { ...it, formulacao, nutrientes, pesoSacoRef: daCompra.pesoSaco || it.pesoSacoRef } : it));
         }
         else if (baseMatch) {
-            setFormulacao(baseMatch.formulacao || "");
-            aplicarComposicao(composicaoDoBase(prefill.produto) || {});
+            const comp = composicaoDoBase(prefill.produto) || {};
+            const nutrientes = {};
+            NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => { nutrientes[nu.key] = comp[nu.key] != null ? String(comp[nu.key]) : ""; });
+            setItens((prev) => prev.map((it, idx) => idx === 0 ? { ...it, formulacao: baseMatch.formulacao || "", nutrientes } : it));
         }
     }, []);
-    const valido = data && produto.trim() && quantidade && (!aplicarVarios || talhoesSelecionados.length > 0);
+    // versão derivada dos itens, já com preço/custo calculado — recalcula a
+    // cada render, sem precisar de useEffect (evita ficar "atrasado")
+    const itensComCusto = itens.map((it) => {
+        const infoPreco = it.produto ? precoUnitarioDoProduto(it.produto, compras) : null;
+        const unidadeEfetiva = aplicarVarios ? unidadeVarios : it.unidade;
+        let custo = null;
+        if (infoPreco && it.quantidade && !aplicarVarios) {
+            const baseAplicada = paraUnidadeBase(it.quantidade, unidadeEfetiva, it.pesoSacoRef);
+            custo = infoPreco.precoPorBase * baseAplicada;
+        }
+        return { ...it, infoPreco, custo, unidadeEfetiva };
+    });
+    const valido = data && itens.length > 0 && itens.every((it) => it.produto.trim() && it.quantidade) && (!aplicarVarios || talhoesSelecionados.length > 0);
+    const montarNutrientesSalvos = (it) => {
+        const nutrientesSalvos = {};
+        NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => { const v = it.nutrientes[nu.key]; nutrientesSalvos[nu.key] = v !== "" ? Number(v) : null; });
+        return nutrientesSalvos;
+    };
     return (React.createElement(Modal, { title: initial ? "Editar adubação" : "Registrar adubação aplicada", onClose: onClose },
         React.createElement(Field, { label: "Data da aplica\u00E7\u00E3o" },
             React.createElement("input", { type: "date", className: inputCls, value: data, onChange: (e) => setData(e.target.value) })),
         !initial && talhoes && talhoes.length > 1 && (React.createElement("label", { className: "flex items-center gap-2 mb-3 -mt-1 text-sm text-stone-700 bg-[#f2ece0] rounded-lg px-3 py-2" },
-            React.createElement("input", { type: "checkbox", checked: aplicarVarios, onChange: (e) => { setAplicarVarios(e.target.checked); if (e.target.checked) setUnidade(`${tipoMedidaVarios}/${baseDoseVarios === "planta" ? "planta" : "ha"}`); }, className: "w-4 h-4 accent-[#33422e]" }),
+            React.createElement("input", { type: "checkbox", checked: aplicarVarios, onChange: (e) => setAplicarVarios(e.target.checked), className: "w-4 h-4 accent-[#33422e]" }),
             `Aplicar nos ${talhoes.length} talh\u00F5es de uma vez (dose por hectare, ajustada pro tamanho de cada um)`)),
-        React.createElement(Field, { label: "Produto/fertilizante (do estoque)" },
-            React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: "Adubo", value: produto, onChange: setProduto, onProdutoSelecionado: (c) => {
-                    const baseMatch = BASE_PRODUTOS.find((p) => p.nome.trim().toLowerCase() === (c.produto || "").trim().toLowerCase());
-                    setFormulacao(c.formulacao || (baseMatch ? baseMatch.formulacao : "") || "");
-                    const temNaCompra = NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).some((nu) => c[nu.key] != null);
-                    aplicarComposicao(temNaCompra ? c : composicaoDoBase(c.produto) || {});
-                    if (c.pesoSaco)
-                        setPesoSacoRef(c.pesoSaco);
-                } })),
-        React.createElement(Field, { label: "Formula\u00E7\u00E3o / ingrediente ativo (da compra)" },
-            React.createElement("input", { className: inputCls, placeholder: "Preenchido ao escolher o produto acima, pode ajustar", value: formulacao, onChange: (e) => setFormulacao(e.target.value) })),
         aplicarVarios && (React.createElement(Field, { label: "Como informar a dose" },
-            React.createElement(ChoiceRow, { options: [["hectare", "Por hectare"], ["planta", "Por planta"]], value: baseDoseVarios, onChange: (v) => { setBaseDoseVarios(v); setUnidade(`${tipoMedidaVarios}/${v === "planta" ? "planta" : "ha"}`); } }))),
+            React.createElement(ChoiceRow, { options: [["hectare", "Por hectare"], ["planta", "Por planta"]], value: baseDoseVarios, onChange: setBaseDoseVarios }))),
         aplicarVarios && (React.createElement(Field, { label: "Produto s\u00F3lido ou l\u00EDquido?" },
-            React.createElement(ChoiceRow, { options: [["kg", "S\u00F3lido (kg)"], ["L", "L\u00EDquido (L)"]], value: tipoMedidaVarios, onChange: (v) => { setTipoMedidaVarios(v); setUnidade(`${v}/${baseDoseVarios === "planta" ? "planta" : "ha"}`); } }))),
-        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
-            React.createElement(Field, { label: aplicarVarios ? (baseDoseVarios === "planta" ? "Dose (por planta)" : "Dose (por hectare)") : "Quantidade" },
-                React.createElement(NumInput, { placeholder: aplicarVarios && baseDoseVarios === "planta" ? "Ex: 0.2" : "Ex: 5", value: quantidade, onChange: (e) => setQuantidade(e.target.value) })),
-            React.createElement(Field, { label: "Unidade" },
-                aplicarVarios ? (React.createElement("input", { className: inputCls + " bg-stone-100 text-stone-500", value: unidade, disabled: true })) : (React.createElement("select", { className: inputCls, value: unidade, onChange: (e) => setUnidade(e.target.value) },
-                    React.createElement("option", { value: "kg" }, "kg"),
-                    React.createElement("option", { value: "kg/ha" }, "kg/ha"),
-                    React.createElement("option", { value: "sacos" }, "sacos"),
-                    React.createElement("option", { value: "L" }, "litros"))))),
+            React.createElement(ChoiceRow, { options: [["kg", "S\u00F3lido (kg)"], ["L", "L\u00EDquido (L)"]], value: tipoMedidaVarios, onChange: setTipoMedidaVarios }))),
+        React.createElement("p", { className: "text-xs font-semibold text-stone-600 mb-1" },
+            itens.length > 1 ? "Produtos misturados nessa calda" : "Produto"),
+        itensComCusto.map((it, i) => (React.createElement("div", { key: it.chave, className: "bg-[#f7f2e7] rounded-lg p-3 mb-2" },
+            itens.length > 1 && (React.createElement("div", { className: "flex items-center justify-between mb-1" },
+                React.createElement("span", { className: "text-xs font-semibold text-stone-500" }, "Produto ", i + 1),
+                React.createElement("button", { type: "button", onClick: () => removerItem(i), className: "text-xs text-[#a8442f] font-semibold" }, "Remover"))),
+            React.createElement(Field, { label: "Produto/fertilizante (do estoque)" },
+                React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: "Adubo", value: it.produto, onChange: (v) => atualizarItem(i, "produto", v), onProdutoSelecionado: (c) => escolherProdutoItem(i, c) })),
+            React.createElement(Field, { label: "Formula\u00E7\u00E3o / ingrediente ativo (da compra)" },
+                React.createElement("input", { className: inputCls, placeholder: "Preenchido ao escolher o produto acima, pode ajustar", value: it.formulacao, onChange: (e) => atualizarItem(i, "formulacao", e.target.value) })),
+            React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+                React.createElement(Field, { label: aplicarVarios ? (baseDoseVarios === "planta" ? "Dose (por planta)" : "Dose (por hectare)") : "Quantidade" },
+                    React.createElement(NumInput, { placeholder: aplicarVarios && baseDoseVarios === "planta" ? "Ex: 0.2" : "Ex: 5", value: it.quantidade, onChange: (e) => atualizarItem(i, "quantidade", e.target.value) })),
+                React.createElement(Field, { label: "Unidade" },
+                    aplicarVarios ? (React.createElement("input", { className: inputCls + " bg-stone-100 text-stone-500", value: unidadeVarios, disabled: true })) : (React.createElement("select", { className: inputCls, value: it.unidade, onChange: (e) => atualizarItem(i, "unidade", e.target.value) },
+                        React.createElement("option", { value: "kg" }, "kg"),
+                        React.createElement("option", { value: "kg/ha" }, "kg/ha"),
+                        React.createElement("option", { value: "sacos" }, "sacos"),
+                        React.createElement("option", { value: "L" }, "litros"))))),
+            !aplicarVarios && it.unidade === "sacos" && (React.createElement("p", { className: "text-xs text-stone-400 -mt-1 mb-1" },
+                "Considerando saco de ", it.pesoSacoRef, "kg (peso registrado na compra desse produto).")),
+            !aplicarVarios && (it.infoPreco ? (React.createElement("p", { className: "text-xs text-[#4c6146]" },
+                "Custo: R$ ", it.custo != null ? fmtBR(it.custo, 2) : "0,00",
+                React.createElement("span", { className: "block text-[11px] font-normal text-stone-400" }, "(R$ ", fmtBR(it.infoPreco.precoPorBase, 2), "/", it.infoPreco.unidadeCompra === "sacos" ? "kg" : it.infoPreco.unidadeCompra, " \u2014 \u00FAltima compra)"))) : (React.createElement("p", { className: "text-xs text-[#a8442f]" }, "Sem compra registrada para esse produto \u2014 cadastre em \"Financeiro\" pra o custo ser calculado."))),
+            React.createElement("p", { className: "block text-[11px] font-semibold tracking-wide text-stone-500 uppercase mb-1 mt-2" }, "Composi\u00E7\u00E3o do produto (% em peso)"),
+            React.createElement("div", { className: "grid grid-cols-4 gap-2 mb-2" }, NUTRIENTES_MACRO.map((nu) => (React.createElement("label", { key: nu.key, className: "block" },
+                React.createElement("span", { className: "block text-[10px] text-stone-500 mb-0.5" }, nu.label),
+                React.createElement("input", { type: "number", inputMode: "decimal", className: "w-full rounded-lg border border-stone-300 bg-white px-2 py-2 text-sm", value: it.nutrientes[nu.key], onChange: (e) => atualizarNutrienteItem(i, nu.key, e.target.value) }))))),
+            React.createElement("div", { className: "grid grid-cols-4 gap-2" }, NUTRIENTES_MICRO.map((nu) => (React.createElement("label", { key: nu.key, className: "block" },
+                React.createElement("span", { className: "block text-[10px] text-stone-500 mb-0.5" }, nu.label),
+                React.createElement("input", { type: "number", inputMode: "decimal", className: "w-full rounded-lg border border-stone-300 bg-white px-2 py-2 text-sm", value: it.nutrientes[nu.key], onChange: (e) => atualizarNutrienteItem(i, nu.key, e.target.value) }))))))),
+        !initial && React.createElement("button", { type: "button", onClick: adicionarItem, className: "w-full flex items-center justify-center gap-1 border border-dashed border-[#c9a06c] text-[#8a6d3b] rounded-lg py-2 text-xs font-semibold mb-3" },
+            React.createElement(Icon, { name: "plus", size: 14 }),
+            " Adicionar outro produto na mesma calda"),
         aplicarVarios && (React.createElement("div", { className: "bg-[#f2ece0] rounded-lg p-3 mb-3" },
             React.createElement("p", { className: "text-xs font-semibold text-stone-600 mb-2" }, "Aplicar em quais talh\u00F5es?"),
             (talhoes || []).map((t) => {
                 const areaT = Number(t.area) || 0;
                 const numPlantasT = Number(t.numPlantas) || 0;
-                const fator = baseDoseVarios === "planta" ? numPlantasT : areaT;
-                const qtdTalhao = (Number(quantidade) || 0) * fator;
-                const qtdPorPlanta = baseDoseVarios === "planta" ? Number(quantidade) || 0 : (numPlantasT ? (qtdTalhao * 1000) / numPlantasT : null);
                 return (React.createElement("label", { key: t.id, className: "flex items-center justify-between gap-2 py-1.5 text-sm text-stone-700" },
                     React.createElement("span", { className: "flex items-center gap-2" },
                         React.createElement("input", { type: "checkbox", checked: talhoesSelecionados.includes(t.id), onChange: () => toggleTalhaoSelecionado(t.id), className: "w-4 h-4 accent-[#33422e]" }),
                         t.nome),
                     React.createElement("span", { className: "text-xs text-stone-400 text-right" },
-                        baseDoseVarios === "planta" ? (numPlantasT + " plantas") : (fmtBR(areaT, 2) + " ha"),
-                        quantidade && talhoesSelecionados.includes(t.id) && (React.createElement(React.Fragment, null,
-                            React.createElement("br", null),
-                            fmtBR(qtdTalhao, 2), " ", tipoMedidaVarios === "L" ? "L" : "kg",
-                            qtdPorPlanta != null && baseDoseVarios !== "planta" ? ` \u00B7 ${fmtBR(qtdPorPlanta, 1)} ${tipoMedidaVarios === "L" ? "mL" : "g"}/planta` : "")))));
+                        baseDoseVarios === "planta" ? (numPlantasT + " plantas") : (fmtBR(areaT, 2) + " ha"))));
             }),
             baseDoseVarios === "planta" && (talhoes || []).some((t) => talhoesSelecionados.includes(t.id) && !t.numPlantas) && (React.createElement("p", { className: "text-[11px] text-[#a8442f] mt-2" }, "Alguns talh\u00F5es marcados n\u00E3o t\u00EAm o n\u00FAmero de plantas cadastrado \u2014 esses v\u00E3o ficar com quantidade zero. Edite o talh\u00E3o pra informar as plantas, ou use dose por hectare.")),
-            quantidade && (React.createElement("p", { className: "text-[11px] text-stone-500 mt-2 pt-2 border-t border-stone-200" },
-                "Total estimado: ", fmtBR((talhoes || []).filter((t) => talhoesSelecionados.includes(t.id)).reduce((s, t) => s + (baseDoseVarios === "planta" ? (Number(t.numPlantas) || 0) : (Number(t.area) || 0)), 0) * (Number(quantidade) || 0), 1), ` ${tipoMedidaVarios === "L" ? "L" : "kg"} de produto, somando todos os talh\u00F5es marcados.`)))),
-        !aplicarVarios && unidade === "sacos" && (React.createElement("p", { className: "text-xs text-stone-400 -mt-2 mb-3" },
-            "Considerando saco de ",
-            pesoSacoRef,
-            "kg (peso registrado na compra desse produto).")),
+            itensComCusto.some((it) => it.quantidade) && (React.createElement("div", { className: "text-[11px] text-stone-500 mt-2 pt-2 border-t border-stone-200" },
+                "Total estimado, somando os talh\u00F5es marcados:",
+                itensComCusto.filter((it) => it.produto && it.quantidade).map((it, idx) => (React.createElement("p", { key: idx },
+                    "\u2022 ", it.produto, ": ", fmtBR((talhoes || []).filter((t) => talhoesSelecionados.includes(t.id)).reduce((s, t) => s + (baseDoseVarios === "planta" ? (Number(t.numPlantas) || 0) : (Number(t.area) || 0)), 0) * (Number(it.quantidade) || 0), 1), " ", tipoMedidaVarios)))))))),
         React.createElement(Field, { label: "Parcela" },
             React.createElement("select", { className: inputCls, value: parcela, onChange: (e) => setParcela(e.target.value) },
                 React.createElement("option", null, "1\u00AA parcela"),
                 React.createElement("option", null, "2\u00AA parcela"),
                 React.createElement("option", null, "3\u00AA parcela"),
                 React.createElement("option", null, "Aplica\u00E7\u00E3o \u00FAnica"))),
-        React.createElement(Field, { label: "Custo total (calculado automaticamente)" },
-            infoPreco ? (React.createElement("div", { className: inputCls + " bg-stone-100 text-stone-700 font-semibold" }, custo ? "R$ " + fmtBR(Number(custo), 2) : "R$ 0,00")) : (React.createElement("div", { className: inputCls + " bg-stone-100 text-stone-400" }, "\u2014")),
-            infoPreco ? (React.createElement("p", { className: "text-xs text-[#4c6146] mt-1" },
-                "Pre\u00E7o de compra: R$ ",
-                fmtBR(infoPreco.precoPorBase, 2),
-                "/",
-                infoPreco.unidadeCompra === "sacos" ? "kg" : infoPreco.unidadeCompra,
-                " (compra de ",
-                new Date(infoPreco.dataCompra + "T00:00:00").toLocaleDateString("pt-BR"),
-                ")")) : (React.createElement("p", { className: "text-xs text-[#a8442f] mt-1" }, "Sem compra registrada para esse produto \u2014 cadastre em \"Compras\" na tela inicial pra o custo ser calculado sozinho."))),
-        React.createElement("p", { className: "block text-xs font-semibold tracking-wide text-stone-500 uppercase mb-1 mt-1" }, "Composi\u00E7\u00E3o do produto (% em peso)"),
-        React.createElement("p", { className: "text-xs text-stone-400 mb-2" }, "Preenchido automaticamente ao escolher um produto da lista \u2014 ajuste se o r\u00F3tulo do seu produto for diferente."),
-        React.createElement("div", { className: "grid grid-cols-4 gap-2 mb-3" }, NUTRIENTES_MACRO.map((nu) => (React.createElement("label", { key: nu.key, className: "block" },
-            React.createElement("span", { className: "block text-[10px] text-stone-500 mb-0.5" }, nu.label),
-            React.createElement("input", { type: "number", inputMode: "decimal", className: "w-full rounded-lg border border-stone-300 bg-white px-2 py-2 text-sm", value: nutrientesState[nu.key][0], onChange: (e) => nutrientesState[nu.key][1](e.target.value) }))))),
-        React.createElement("div", { className: "grid grid-cols-4 gap-2 mb-3" }, NUTRIENTES_MICRO.map((nu) => (React.createElement("label", { key: nu.key, className: "block" },
-            React.createElement("span", { className: "block text-[10px] text-stone-500 mb-0.5" }, nu.label),
-            React.createElement("input", { type: "number", inputMode: "decimal", className: "w-full rounded-lg border border-stone-300 bg-white px-2 py-2 text-sm", value: nutrientesState[nu.key][0], onChange: (e) => nutrientesState[nu.key][1](e.target.value) }))))),
         React.createElement(Field, { label: "Observa\u00E7\u00F5es" },
             React.createElement("textarea", { className: inputCls, rows: 2, placeholder: "Alguma anota\u00E7\u00E3o extra (opcional)", value: obs, onChange: (e) => setObs(e.target.value) })),
         React.createElement("p", { className: "text-xs text-stone-400 mb-3 -mt-1" }, "Com a composi\u00E7\u00E3o preenchida, o app soma automaticamente quanto de cada nutriente j\u00E1 foi aplicado e compara com a meta da recomenda\u00E7\u00E3o (inclusive os micronutrientes)."),
         React.createElement(PrimaryBtn, { disabled: !valido, onClick: () => {
-                const nutrientesSalvos = {};
-                NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => {
-                    const val = nutrientesState[nu.key][0];
-                    nutrientesSalvos[nu.key] = val !== "" ? Number(val) : null;
-                });
                 if (aplicarVarios) {
-                    const dose = Number(quantidade) || 0;
-                    const registros = (talhoes || [])
-                        .filter((t) => talhoesSelecionados.includes(t.id))
-                        .map((t) => {
-                            // multiplica a dose pelo "tamanho" de cada talhão — área em
-                            // hectares ou número de plantas, conforme o usuário escolheu
-                            const fator = baseDoseVarios === "planta" ? (Number(t.numPlantas) || 0) : (Number(t.area) || 0);
+                    const talhoesAlvo = (talhoes || []).filter((t) => talhoesSelecionados.includes(t.id));
+                    const registros = [];
+                    talhoesAlvo.forEach((t) => {
+                        const fator = baseDoseVarios === "planta" ? (Number(t.numPlantas) || 0) : (Number(t.area) || 0);
+                        itensComCusto.forEach((it) => {
+                            const dose = Number(it.quantidade) || 0;
                             const qtdTalhao = Math.round(dose * fator * 100) / 100;
-                            const custoTalhao = infoPreco ? Math.round(infoPreco.precoPorBase * qtdTalhao * 100) / 100 : null;
-                            return { talhaoId: t.id, dados: {
-                                id: uid(), data, produto: produto.trim(), formulacao: formulacao.trim(),
-                                quantidade: qtdTalhao, unidade: tipoMedidaVarios, pesoSacoRef, parcela, custo: custoTalhao, obs: obs.trim(), ...nutrientesSalvos,
-                            } };
+                            const custoTalhao = it.infoPreco ? Math.round(it.infoPreco.precoPorBase * qtdTalhao * 100) / 100 : null;
+                            registros.push({ talhaoId: t.id, dados: {
+                                id: uid(), data, produto: it.produto.trim(), formulacao: it.formulacao.trim(),
+                                quantidade: qtdTalhao, unidade: tipoMedidaVarios, pesoSacoRef: it.pesoSacoRef, parcela, custo: custoTalhao, obs: obs.trim(), ...montarNutrientesSalvos(it),
+                            } });
                         });
+                    });
                     onSave({ multiplos: true, registros });
                     return;
                 }
+                if (itensComCusto.length > 1 && talhao) {
+                    const registros = itensComCusto.map((it) => ({ talhaoId: talhao.id, dados: {
+                        id: uid(), data, produto: it.produto.trim(), formulacao: it.formulacao.trim(),
+                        quantidade: Number(it.quantidade), unidade: it.unidade, pesoSacoRef: it.pesoSacoRef, parcela,
+                        custo: it.custo != null ? Number(it.custo.toFixed(2)) : null, obs: obs.trim(), ...montarNutrientesSalvos(it),
+                    } }));
+                    onSave({ multiplos: true, registros });
+                    return;
+                }
+                const it = itensComCusto[0];
                 onSave({
-                    id: initial ? initial.id : uid(), data, produto: produto.trim(), formulacao: formulacao.trim(),
-                    quantidade: Number(quantidade), unidade, pesoSacoRef, parcela, custo: custo !== "" ? Number(custo) : null, obs: obs.trim(), ...nutrientesSalvos,
+                    id: initial ? initial.id : uid(), data, produto: it.produto.trim(), formulacao: it.formulacao.trim(),
+                    quantidade: Number(it.quantidade), unidade: it.unidade, pesoSacoRef: it.pesoSacoRef, parcela,
+                    custo: it.custo != null ? Number(it.custo.toFixed(2)) : null, obs: obs.trim(), ...montarNutrientesSalvos(it),
                 });
             } },
             React.createElement(Icon, { name: "check", size: 18 }),
@@ -3578,39 +3589,39 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
     const [talhaoId, setTalhaoId] = useState(initial ? initial.talhaoId : (talhoes[0] ? talhoes[0].id : ""));
     const [todosOsTalhoes, setTodosOsTalhoes] = useState(false);
     const [forma, setForma] = useState(initial ? initial.forma : "solo");
-    const [produto, setProduto] = useState(initial ? initial.produto : "");
     const [obs, setObs] = useState(initial ? initial.obs || "" : "");
     // Quantidade prevista é opcional — alimenta a "previsão" (sombra) na
     // barra de Meta x aplicado (só faz sentido pra adubação) E a "reserva"
     // de estoque (faz sentido pra qualquer produto, incluindo defensivo).
     // Se ficar em branco, o agendamento não entra em nenhuma das duas.
     const temProduto = forma !== "irrigacao";
-    const [quantidadePrevista, setQuantidadePrevista] = useState(initial ? (initial.quantidade != null ? String(initial.quantidade) : "") : "");
-    const [unidadePrevista, setUnidadePrevista] = useState(initial ? (initial.unidade || "kg") : "kg");
-    const [pesoSacoRefPrevisto, setPesoSacoRefPrevisto] = useState(initial && initial.pesoSacoRef != null ? initial.pesoSacoRef : 50);
-    const [composicaoPrevista, setComposicaoPrevista] = useState(() => {
-        if (!initial) return {};
-        const c = {};
-        NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => { if (initial[nu.key] != null) c[nu.key] = initial[nu.key]; });
-        return c;
+    const novoItem = () => ({ chave: uid(), produto: "", quantidade: "", unidade: "kg", pesoSacoRef: 50, composicao: {} });
+    const [itens, setItens] = useState(() => {
+        if (initial) {
+            const base = { chave: uid(), produto: initial.produto || "", quantidade: initial.quantidade != null ? String(initial.quantidade) : "", unidade: initial.unidade || "kg", pesoSacoRef: initial.pesoSacoRef != null ? initial.pesoSacoRef : 50, composicao: {} };
+            NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => { if (initial[nu.key] != null) base.composicao[nu.key] = initial[nu.key]; });
+            return [base];
+        }
+        return [novoItem()];
     });
-    const aoEscolherProdutoPrevisto = (c) => {
-        const baseMatch = BASE_PRODUTOS.find((p) => p.nome.trim().toLowerCase() === (c.produto || "").trim().toLowerCase());
+    const atualizarItem = (i, campo, valor) => setItens((prev) => prev.map((it, idx) => idx === i ? { ...it, [campo]: valor } : it));
+    const escolherProdutoItem = (i, c) => {
         const temNaCompra = NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).some((nu) => c[nu.key] != null);
         const comp = temNaCompra ? c : (composicaoDoBase(c.produto) || {});
-        const c2 = {};
-        NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => { if (comp[nu.key] != null) c2[nu.key] = comp[nu.key]; });
-        setComposicaoPrevista(c2);
-        if (c.pesoSaco) setPesoSacoRefPrevisto(c.pesoSaco);
+        const composicao = {};
+        NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => { if (comp[nu.key] != null) composicao[nu.key] = comp[nu.key]; });
+        setItens((prev) => prev.map((it, idx) => idx === i ? { ...it, composicao, pesoSacoRef: c.pesoSaco || it.pesoSacoRef } : it));
     };
-    const valido = data && (forma === "irrigacao" || produto.trim()) && (todosOsTalhoes ? talhoes.length > 0 : talhaoId);
-    const montarDados = (extra) => {
-        const base = { data, forma, produto: produto.trim(), obs: obs.trim(), ...extra };
-        if (temProduto && quantidadePrevista) {
-            base.quantidade = Number(quantidadePrevista);
-            base.unidade = unidadePrevista;
-            base.pesoSacoRef = pesoSacoRefPrevisto;
-            Object.keys(composicaoPrevista).forEach((k) => { base[k] = composicaoPrevista[k]; });
+    const adicionarItem = () => setItens((prev) => [...prev, novoItem()]);
+    const removerItem = (i) => setItens((prev) => prev.filter((_, idx) => idx !== i));
+    const valido = data && (!temProduto || itens.every((it) => it.produto.trim())) && (todosOsTalhoes ? talhoes.length > 0 : talhaoId);
+    const montarDadosItem = (it) => {
+        const base = { data, forma, produto: it.produto.trim(), obs: obs.trim() };
+        if (temProduto && it.quantidade) {
+            base.quantidade = Number(it.quantidade);
+            base.unidade = it.unidade;
+            base.pesoSacoRef = it.pesoSacoRef;
+            Object.keys(it.composicao).forEach((k) => { base[k] = it.composicao[k]; });
         }
         return base;
     };
@@ -3626,24 +3637,45 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
                 talhoes.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.nome))))),
         React.createElement(Field, { label: "Forma de aplica\u00E7\u00E3o" },
             React.createElement(ChoiceRow, { options: FORMAS_APLICACAO, value: forma, onChange: setForma, cols: 3 })),
-        forma !== "irrigacao" && (React.createElement(Field, { label: "Produto (do estoque)" },
-            React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: forma === "defensivo" ? ["Defensivo", "Herbicida"] : "todos", value: produto, onChange: setProduto, onProdutoSelecionado: temProduto ? aoEscolherProdutoPrevisto : undefined }))),
-        temProduto && (React.createElement("div", { className: "grid grid-cols-2 gap-3" },
-            React.createElement(Field, { label: "Quantidade prevista (opcional)" },
-                React.createElement(NumInput, { placeholder: "Ex: 5", value: quantidadePrevista, onChange: (e) => setQuantidadePrevista(e.target.value) })),
-            React.createElement(Field, { label: "Unidade" },
-                React.createElement("select", { className: inputCls, value: unidadePrevista, onChange: (e) => setUnidadePrevista(e.target.value) },
-                    React.createElement("option", { value: "kg" }, "kg"),
-                    React.createElement("option", { value: "kg/ha" }, "kg/ha"),
-                    React.createElement("option", { value: "sacos" }, "sacos"),
-                    React.createElement("option", { value: "L" }, "litros"))))),
-        temProduto && (React.createElement("p", { className: "text-[11px] text-stone-400 -mt-2 mb-3" },
-            "Se informar, esse agendamento entra na previs\u00E3o (sombra) da barra de Meta x aplicado e reserva a quantidade no estoque, at\u00E9 voc\u00EA marcar como conclu\u00EDdo.")),
+        temProduto && (React.createElement(React.Fragment, null,
+            React.createElement("p", { className: "text-xs font-semibold text-stone-600 mb-1" },
+                itens.length > 1 ? "Produtos misturados nessa calda" : "Produto"),
+            itens.map((it, i) => (React.createElement("div", { key: it.chave, className: "bg-[#f7f2e7] rounded-lg p-3 mb-2" },
+                itens.length > 1 && (React.createElement("div", { className: "flex items-center justify-between mb-1" },
+                    React.createElement("span", { className: "text-xs font-semibold text-stone-500" }, "Produto ", i + 1),
+                    React.createElement("button", { type: "button", onClick: () => removerItem(i), className: "text-xs text-[#a8442f] font-semibold" }, "Remover"))),
+                React.createElement(Field, { label: "Produto (do estoque)" },
+                    React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: forma === "defensivo" ? ["Defensivo", "Herbicida"] : "todos", value: it.produto, onChange: (v) => atualizarItem(i, "produto", v), onProdutoSelecionado: (c) => escolherProdutoItem(i, c) })),
+                React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+                    React.createElement(Field, { label: "Quantidade prevista (opcional)" },
+                        React.createElement(NumInput, { placeholder: "Ex: 5", value: it.quantidade, onChange: (e) => atualizarItem(i, "quantidade", e.target.value) })),
+                    React.createElement(Field, { label: "Unidade" },
+                        React.createElement("select", { className: inputCls, value: it.unidade, onChange: (e) => atualizarItem(i, "unidade", e.target.value) },
+                            React.createElement("option", { value: "kg" }, "kg"),
+                            React.createElement("option", { value: "kg/ha" }, "kg/ha"),
+                            React.createElement("option", { value: "sacos" }, "sacos"),
+                            React.createElement("option", { value: "L" }, "litros"))))))),
+            !initial && React.createElement("button", { type: "button", onClick: adicionarItem, className: "w-full flex items-center justify-center gap-1 border border-dashed border-[#c9a06c] text-[#8a6d3b] rounded-lg py-2 text-xs font-semibold mb-2" },
+                React.createElement(Icon, { name: "plus", size: 14 }),
+                " Adicionar outro produto na mesma calda"),
+            React.createElement("p", { className: "text-[11px] text-stone-400 -mt-1 mb-3" },
+                "Se informar a quantidade, o agendamento entra na previs\u00E3o (sombra) da barra de Meta x aplicado e reserva a quantidade no estoque, at\u00E9 voc\u00EA marcar como conclu\u00EDdo."))),
         React.createElement(Field, { label: "Observa\u00E7\u00F5es" },
             React.createElement("textarea", { className: inputCls, rows: 2, placeholder: "Ex: aplicar cedo, antes da chuva...", value: obs, onChange: (e) => setObs(e.target.value) })),
-        React.createElement(PrimaryBtn, { disabled: !valido, onClick: () => onSave(todosOsTalhoes
-                ? montarDados({ todos: true, talhaoIds: talhoes.map((t) => t.id) })
-                : montarDados({ id: initial ? initial.id : uid(), talhaoId })) },
+        React.createElement(PrimaryBtn, { disabled: !valido, onClick: () => {
+                const talhoesAlvo = todosOsTalhoes ? talhoes.map((t) => t.id) : [talhaoId];
+                if (talhoesAlvo.length === 1 && itens.length === 1) {
+                    onSave({ ...montarDadosItem(itens[0]), id: initial ? initial.id : uid(), talhaoId: talhoesAlvo[0] });
+                    return;
+                }
+                const registros = [];
+                talhoesAlvo.forEach((tid) => {
+                    itens.forEach((it) => {
+                        registros.push({ talhaoId: tid, dados: { ...montarDadosItem(it), id: uid(), talhaoId: tid } });
+                    });
+                });
+                onSave({ multiplos: true, registros });
+            } },
             React.createElement(Icon, { name: "check", size: 18 }),
             " ",
             todosOsTalhoes ? `Agendar nos ${talhoes.length} talh\u00F5es` : (initial ? "Salvar alterações" : "Agendar"))));
@@ -3754,7 +3786,7 @@ function CartaoEpocasCafeicultor() {
                 Array.from({ length: 12 }, (_, i) => i + 1).map((mes) => React.createElement("div", { key: mes, className: "h-3.5 rounded-sm " + (linha.meses.includes(mes) ? "bg-[#c1443a]" : "bg-stone-100") + (mes === mesAtual ? " ring-1 ring-[#33422e]" : "") }))))),
         React.createElement("p", { className: "text-[10px] text-stone-400 mt-2" }, "Barras vermelhas = per\u00EDodo recomendado. O m\u00EAs atual fica marcado com um contorno.")));
 }
-function CalendarioScreen({ talhoes, adubacoes, defensivos, agendamentos, compras, onAddAgendamento, onAddAgendamentoEmLote, onAddAdubacao, onAddDefensivo, onUpdateAgendamento, onDeleteAgendamento, onUpdateAdubacao, onDeleteAdubacao, onBack }) {
+function CalendarioScreen({ talhoes, adubacoes, defensivos, agendamentos, compras, onAddAgendamento, onAddAgendamentoEmLote, onAddAdubacao, onAddAdubacaoEmLote, onAddDefensivo, onUpdateAgendamento, onDeleteAgendamento, onUpdateAdubacao, onDeleteAdubacao, onBack }) {
     const [showForm, setShowForm] = useState(false);
     const [editando, setEditando] = useState(null);
     const [editandoIrrigacao, setEditandoIrrigacao] = useState(null);
@@ -3876,8 +3908,8 @@ function CalendarioScreen({ talhoes, adubacoes, defensivos, agendamentos, compra
             React.createElement("p", { className: "text-xs text-stone-400 px-1" }, "Ao marcar um agendamento como \"Conclu\u00EDdo\", ele vira um registro de verdade no hist\u00F3rico do talh\u00E3o (com custo) e sai desta lista."),
             React.createElement(CartaoEpocasCafeicultor, null)),
         showForm && (React.createElement(AgendamentoForm, { talhoes: talhoes, compras: compras, dataInicial: diaSelecionado, onClose: () => setShowForm(false), onSave: (a) => {
-                if (a.todos) {
-                    onAddAgendamentoEmLote(a.talhaoIds.map((tid) => ({ talhaoId: tid, dados: { id: uid(), data: a.data, talhaoId: tid, forma: a.forma, produto: a.produto, obs: a.obs } })));
+                if (a.multiplos) {
+                    onAddAgendamentoEmLote(a.registros);
                 }
                 else {
                     onAddAgendamento(a.talhaoId, a);
@@ -3887,7 +3919,8 @@ function CalendarioScreen({ talhoes, adubacoes, defensivos, agendamentos, compra
         editando && (React.createElement(AgendamentoForm, { talhoes: talhoes, compras: compras, initial: editando, onClose: () => setEditando(null), onSave: (a) => { onUpdateAgendamento(a.talhaoId, a); setEditando(null); } })),
         editandoIrrigacao && (React.createElement(EditarIrrigacaoForm, { initial: editandoIrrigacao.item, onClose: () => setEditandoIrrigacao(null), onSave: (r) => { onUpdateAdubacao(editandoIrrigacao.talhaoId, r); setEditandoIrrigacao(null); } })),
         concluindo && (React.createElement(AdubacaoForm, { compras: compras, talhao: (talhoes || []).find((t) => t.id === concluindo.talhaoId), prefill: { data: concluindo.item.data, produto: concluindo.item.produto }, onClose: () => setConcluindo(null), onSave: (a) => {
-                onAddAdubacao(concluindo.talhaoId, a);
+                if (a.multiplos) { onAddAdubacaoEmLote(a.registros); }
+                else { onAddAdubacao(concluindo.talhaoId, a); }
                 onDeleteAgendamento(concluindo.talhaoId, concluindo.item.id);
                 setConcluindo(null);
             } })),
@@ -5482,7 +5515,7 @@ function TelaSuporte() {
                 defensivos: dados.defensivos,
                 agendamentos: dados.agendamentos,
                 compras: dados.compras,
-                onAddAgendamento: noop, onAddAgendamentoEmLote: noop, onAddAdubacao: noop,
+                onAddAgendamento: noop, onAddAgendamentoEmLote: noop, onAddAdubacao: noop, onAddAdubacaoEmLote: noop,
                 onUpdateAgendamento: noop, onDeleteAgendamento: noop,
                 onAddDefensivo: noop, onUpdateAdubacao: noop, onDeleteAdubacao: noop,
                 onBack: function () { setShowCalendario(false); },
@@ -5957,7 +5990,7 @@ function App() {
             onAbrirCalculadoras: () => { setShowAjuda(false); setShowCalculadoras(true); },
             onAbrirCalendario: () => { setShowAjuda(false); setShowCalendario(true); },
             onAbrirConfiguracoes: () => { setShowAjuda(false); setShowConfiguracoes(true); },
-        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, adubacoes: adubacoes, defensivos: defensivos, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showComunidade ? (React.createElement(TelaComunidade, { onBack: () => setShowComunidade(false), meuNome: meuNomeComunidade, souAdmin: false })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], agendamentos: agendamentos[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" },
+        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, adubacoes: adubacoes, defensivos: defensivos, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showComunidade ? (React.createElement(TelaComunidade, { onBack: () => setShowComunidade(false), meuNome: meuNomeComunidade, souAdmin: false })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], agendamentos: agendamentos[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" },
             React.createElement("div", { className: "bg-gradient-to-br from-[#3d4f36] to-[#242e1f] text-white px-4 pt-6 pb-6 rounded-b-3xl shadow-lg" },
                 React.createElement("div", { className: "flex items-center justify-between" },
                     React.createElement("div", { className: "flex items-center gap-2" },
