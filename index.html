@@ -3586,6 +3586,12 @@ function CalculadorasScreen({ talhoes, onBack }) {
 const FORMAS_APLICACAO = [["solo", "Via Solo"], ["foliar", "Foliar"], ["fertirrigacao", "Fertirrigação"], ["irrigacao", "Irrigação"], ["defensivo", "Defensivo"], ["outro", "Outro"]];
 function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compras }) {
     const [data, setData] = useState(initial ? initial.data : (dataInicial || new Date().toISOString().slice(0, 10)));
+    // Datas extras (opcional) — pra agendar a mesma aplicação em vários dias
+    // de uma vez (ex: fertirrigação semanal), sem repetir o formulário.
+    const [datasExtras, setDatasExtras] = useState([]);
+    const adicionarDataExtra = () => setDatasExtras((prev) => [...prev, ""]);
+    const atualizarDataExtra = (i, valor) => setDatasExtras((prev) => prev.map((d, idx) => idx === i ? valor : d));
+    const removerDataExtra = (i) => setDatasExtras((prev) => prev.filter((_, idx) => idx !== i));
     const [talhaoId, setTalhaoId] = useState(initial ? initial.talhaoId : (talhoes[0] ? talhoes[0].id : ""));
     const [todosOsTalhoes, setTodosOsTalhoes] = useState(false);
     const [forma, setForma] = useState(initial ? initial.forma : "solo");
@@ -3615,8 +3621,8 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
     const adicionarItem = () => setItens((prev) => [...prev, novoItem()]);
     const removerItem = (i) => setItens((prev) => prev.filter((_, idx) => idx !== i));
     const valido = data && (!temProduto || itens.every((it) => it.produto.trim())) && (todosOsTalhoes ? talhoes.length > 0 : talhaoId);
-    const montarDadosItem = (it) => {
-        const base = { data, forma, produto: it.produto.trim(), obs: obs.trim() };
+    const montarDadosItem = (it, dataAlvo) => {
+        const base = { data: dataAlvo, forma, produto: it.produto.trim(), obs: obs.trim() };
         if (temProduto && it.quantidade) {
             base.quantidade = Number(it.quantidade);
             base.unidade = it.unidade;
@@ -3625,9 +3631,18 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
         }
         return base;
     };
+    const talhoesAlvo = todosOsTalhoes ? talhoes.map((t) => t.id) : [talhaoId];
+    const todasDatas = [data, ...datasExtras.filter((d) => d)];
+    const totalRegistros = talhoesAlvo.length * todasDatas.length * itens.length;
     return (React.createElement(Modal, { title: initial ? "Editar agendamento" : "Agendar aplicação", onClose: onClose },
         React.createElement(Field, { label: "Data planejada" },
             React.createElement("input", { type: "date", className: inputCls, value: data, onChange: (e) => setData(e.target.value) })),
+        datasExtras.map((d, i) => (React.createElement("div", { key: i, className: "flex items-center gap-2 mb-3 -mt-1" },
+            React.createElement("input", { type: "date", className: inputCls, value: d, onChange: (e) => atualizarDataExtra(i, e.target.value) }),
+            React.createElement("button", { type: "button", onClick: () => removerDataExtra(i), className: "text-xs text-[#a8442f] font-semibold shrink-0 px-1" }, "Remover")))),
+        !initial && React.createElement("button", { type: "button", onClick: adicionarDataExtra, className: "w-full flex items-center justify-center gap-1 border border-dashed border-[#9fb08f] text-[#33422e] rounded-lg py-2 text-xs font-semibold mb-3" },
+            React.createElement(Icon, { name: "plus", size: 14 }),
+            " Adicionar outra data (agenda tudo de uma vez)"),
         !initial && talhoes.length > 1 && (React.createElement("label", { className: "flex items-center gap-2 mb-3 -mt-1 text-sm text-stone-700 bg-[#f2ece0] rounded-lg px-3 py-2" },
             React.createElement("input", { type: "checkbox", checked: todosOsTalhoes, onChange: (e) => setTodosOsTalhoes(e.target.checked), className: "w-4 h-4 accent-[#33422e]" }),
             `Agendar nos ${talhoes.length} talh\u00F5es de uma vez (mesma data e produto)`)),
@@ -3663,22 +3678,23 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
         React.createElement(Field, { label: "Observa\u00E7\u00F5es" },
             React.createElement("textarea", { className: inputCls, rows: 2, placeholder: "Ex: aplicar cedo, antes da chuva...", value: obs, onChange: (e) => setObs(e.target.value) })),
         React.createElement(PrimaryBtn, { disabled: !valido, onClick: () => {
-                const talhoesAlvo = todosOsTalhoes ? talhoes.map((t) => t.id) : [talhaoId];
-                if (talhoesAlvo.length === 1 && itens.length === 1) {
-                    onSave({ ...montarDadosItem(itens[0]), id: initial ? initial.id : uid(), talhaoId: talhoesAlvo[0] });
+                if (totalRegistros === 1) {
+                    onSave({ ...montarDadosItem(itens[0], data), id: initial ? initial.id : uid(), talhaoId: talhoesAlvo[0] });
                     return;
                 }
                 const registros = [];
                 talhoesAlvo.forEach((tid) => {
-                    itens.forEach((it) => {
-                        registros.push({ talhaoId: tid, dados: { ...montarDadosItem(it), id: uid(), talhaoId: tid } });
+                    todasDatas.forEach((d) => {
+                        itens.forEach((it) => {
+                            registros.push({ talhaoId: tid, dados: { ...montarDadosItem(it, d), id: uid(), talhaoId: tid } });
+                        });
                     });
                 });
                 onSave({ multiplos: true, registros });
             } },
             React.createElement(Icon, { name: "check", size: 18 }),
             " ",
-            todosOsTalhoes ? `Agendar nos ${talhoes.length} talh\u00F5es` : (initial ? "Salvar alterações" : "Agendar"))));
+            totalRegistros > 1 ? `Criar ${totalRegistros} agendamentos` : (initial ? "Salvar alterações" : "Agendar"))));
 }
 /* ---- Tela de calendário/acompanhamento ---- */
 const DIAS_SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
