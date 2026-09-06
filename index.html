@@ -2961,6 +2961,9 @@ function PragasTab({ talhao, talhoes, ocorrencias, defensivos, compras, onAddOco
 /* ---- Tela de detalhe do talhão ---- */
 function TalhaoDetail({ talhao, talhoes, analises, adubacoes, agendamentos, ocorrencias, defensivos, despesas, comprasGlobais, tabelas, onBack, onAddAnalise, onUpdateAnalise, onDeleteAnalise, onAddAdubacao, onAddAdubacaoEmLote, onAddDefensivoEmLote, onUpdateAdubacao, onDeleteAdubacao, onAddOcorrencia, onUpdateOcorrencia, onDeleteOcorrencia, onAddDefensivo, onUpdateDefensivo, onDeleteDefensivo, onAddDespesa, onAddDespesaEmLote, onUpdateDespesa, onDeleteDespesa, onDeleteTalhao, }) {
     const [tab, setTab] = useState("recomendacao");
+    useEffect(() => { window.scrollTo(0, 0); }, [tab]);
+    const [despesasExpandidas, setDespesasExpandidas] = useState({});
+    const toggleDespesaExpandida = (id) => setDespesasExpandidas((prev) => ({ ...prev, [id]: !prev[id] }));
     const [showAnaliseForm, setShowAnaliseForm] = useState(false);
     const [editAnalise, setEditAnalise] = useState(null);
     const [showAdubacaoForm, setShowAdubacaoForm] = useState(false);
@@ -3120,7 +3123,9 @@ function TalhaoDetail({ talhao, talhoes, analises, adubacoes, agendamentos, ocor
                         `Mesmo lan\u00E7amento tamb\u00E9m registrado em outros ${d.replicadoQtdTalhoes - 1} talh\u00F5es`)),
                     d.rateadoQtdTalhoes > 1 && (React.createElement("p", { className: "text-xs text-stone-400 mt-0.5" },
                         `Rateado de R$ ${fmtBR(d.rateadoTotal, 2)} entre ${d.rateadoQtdTalhoes} talh\u00F5es`)),
-                    d.obs && React.createElement("p", { className: "text-xs text-stone-400 italic mt-0.5" }, d.obs)))))),
+                    d.obs && (React.createElement("button", { onClick: () => toggleDespesaExpandida(d.id), className: "text-[10px] text-[#4c6146] font-semibold mt-1 flex items-center gap-1" },
+                        despesasExpandidas[d.id] ? "Ocultar detalhes \u25B2" : "Ver detalhes \u25BC")),
+                    d.obs && despesasExpandidas[d.id] && React.createElement("p", { className: "text-xs text-stone-400 italic mt-1" }, d.obs)))))),
             tab !== "recomendacao" && (React.createElement(BotaoExcluirTalhao, { talhao, onDeleteTalhao }))),
         showAnaliseForm && (React.createElement(AnaliseForm, { onClose: () => setShowAnaliseForm(false), onSave: (a) => { onAddAnalise(talhao.id, a); setShowAnaliseForm(false); } })),
         editAnalise && (React.createElement(AnaliseForm, { initial: editAnalise, onClose: () => setEditAnalise(null), onSave: (a) => { onUpdateAnalise(a); setEditAnalise(null); } })),
@@ -3563,6 +3568,7 @@ function CalculadoraFertirrigacao({ talhoes }) {
 /* ---- Tela das calculadoras ---- */
 function CalculadorasScreen({ talhoes, onBack }) {
     const [tab, setTab] = useState("solo");
+    useEffect(() => { window.scrollTo(0, 0); }, [tab]);
     const TITULOS = { solo: "Recomendação via Solo", foliar: "Recomendação Foliar", fertirrigacao: "Recomendação via Fertirrigação" };
     return (React.createElement("div", { className: "pb-24" },
         React.createElement("div", { className: "bg-gradient-to-br from-[#3d4f36] to-[#242e1f] text-white px-4 pt-4 pb-5 rounded-b-3xl shadow-lg" },
@@ -3968,6 +3974,7 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos,
     const [showReceitaForm, setShowReceitaForm] = useState(false);
     const [editReceita, setEditReceita] = useState(null);
     const [aba, setAba] = useState("compras");
+    useEffect(() => { window.scrollTo(0, 0); }, [aba]);
     const estoque = calcularEstoque(compras, adubacoes, defensivos, despesas, talhoes, agendamentos);
     const [categoriaFiltroEstoque, setCategoriaFiltroEstoque] = useState("todas");
     const estoqueFiltrado = categoriaFiltroEstoque === "todas" ? estoque : estoque.filter((i) => i.categoria === categoriaFiltroEstoque);
@@ -5743,6 +5750,9 @@ function App() {
     const atrasados = talhoes.flatMap((t) => (agendamentos[t.id] || [])
         .filter((a) => !a.concluido && a.data < hojeISO)
         .map((a) => ({ ...a, talhaoNome: t.nome })));
+    const paraHoje = talhoes.flatMap((t) => (agendamentos[t.id] || [])
+        .filter((a) => !a.concluido && a.data === hojeISO)
+        .map((a) => ({ ...a, talhaoNome: t.nome })));
     const pedirPermissaoNotificacao = () => {
         if (typeof Notification === "undefined") return;
         Notification.requestPermission().then((p) => setPermissaoNotificacao(p));
@@ -5764,6 +5774,25 @@ function App() {
         }
         catch (e) { /* navegador sem suporte a Notification em foreground — ignora */ }
     }, [loaded, atrasados.length, hojeISO]);
+    // mesma ideia, mas pro que está agendado pra HOJE (não atrasado ainda)
+    // — avisa uma vez por dia, no dia certo da aplicação
+    useEffect(() => {
+        if (!loaded || typeof Notification === "undefined" || Notification.permission !== "granted") return;
+        if (paraHoje.length === 0) return;
+        const chave = "bacao_ultimo_aviso_hoje";
+        const ultimo = localStorage.getItem(chave);
+        if (ultimo === hojeISO) return;
+        try {
+            new Notification("Aplicação agendada para hoje", {
+                body: paraHoje.length === 1
+                    ? `${paraHoje[0].talhaoNome}: ${(FORMAS_APLICACAO.find(([k]) => k === paraHoje[0].forma) || [null, paraHoje[0].forma])[1]}${paraHoje[0].produto ? " — " + paraHoje[0].produto : ""}`
+                    : `${paraHoje.length} aplicações agendadas para hoje na lavoura.`,
+                icon: "/icon-192.png",
+            });
+            localStorage.setItem(chave, hojeISO);
+        }
+        catch (e) { /* navegador sem suporte a Notification em foreground — ignora */ }
+    }, [loaded, paraHoje.length, hojeISO]);
     // --- Botão de voltar do celular navega dentro do app ---
     // Cada tela "de nível 1" aberta empurra um estado no histórico do
     // navegador; ao pressionar voltar, fechamos essa tela em vez de
@@ -5779,6 +5808,9 @@ function App() {
         : showIrrigacaoHome ? "irrigacao"
         : selectedId ? "talhao"
         : null;
+    // Sempre que troca de tela, volta o scroll pro topo — sem isso, a tela
+    // nova abre "no meio"/"no fim" se a anterior estava rolada.
+    useEffect(() => { window.scrollTo(0, 0); }, [telaAtual]);
     const telaAnteriorRef = useRef(null);
     const ignorandoPopStateRef = useRef(false);
     useEffect(() => {
@@ -6030,6 +6062,14 @@ function App() {
                         "\u2022 ", a.talhaoNome, " \u2014 ", a.produto || (FORMAS_APLICACAO.find(([k]) => k === a.forma) || [null, a.forma])[1], " (", new Date(a.data + "T00:00:00").toLocaleDateString("pt-BR"), ")"))),
                     atrasados.length > 3 && React.createElement("p", { className: "text-xs text-[#8a3a29]" }, "\u2022 e mais ", atrasados.length - 3, "..."),
                     React.createElement("p", { className: "text-[11px] text-[#a8442f] mt-1 font-semibold" }, "Toque para ver o calend\u00E1rio \u2192"))),
+                paraHoje.length > 0 && (React.createElement("button", { onClick: () => setShowCalendario(true), className: "w-full text-left bg-[#e9f0f7] border border-[#c9dced] rounded-2xl p-3 active:bg-[#dce9f3]" },
+                    React.createElement("p", { className: "text-xs font-bold text-[#2d5a7a] mb-1 flex items-center gap-1" },
+                        React.createElement(Icon, { name: "calendar", size: 13 }),
+                        paraHoje.length === 1 ? "1 aplica\u00E7\u00E3o agendada pra hoje" : paraHoje.length + " aplica\u00E7\u00F5es agendadas pra hoje"),
+                    paraHoje.slice(0, 3).map((a, i) => (React.createElement("p", { key: a.id || i, className: "text-xs text-[#2d5a7a]" },
+                        "\u2022 ", a.talhaoNome, " \u2014 ", a.produto || (FORMAS_APLICACAO.find(([k]) => k === a.forma) || [null, a.forma])[1]))),
+                    paraHoje.length > 3 && React.createElement("p", { className: "text-xs text-[#2d5a7a]" }, "\u2022 e mais ", paraHoje.length - 3, "..."),
+                    React.createElement("p", { className: "text-[11px] text-[#2d5a7a] mt-1 font-semibold" }, "Toque para ver o calend\u00E1rio \u2192"))),
                 permissaoNotificacao === "default" && (React.createElement("button", { onClick: pedirPermissaoNotificacao, className: "w-full flex items-center justify-center gap-2 border border-dashed border-[#9fb08f] text-[#33422e] rounded-xl py-2.5 text-xs font-semibold" },
                     React.createElement(Icon, { name: "alert", size: 14 }),
                     " Ativar avisos de atraso neste aparelho")),
