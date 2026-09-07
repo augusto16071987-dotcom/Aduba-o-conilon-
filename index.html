@@ -1322,6 +1322,28 @@ function BotoesPDF({ dadosRelatorio }) {
 }
 /* ----------------------------- UI ------------------------------ */
 const TEXTURA_LABEL = { argilosa: "Argilosa", media: "Média", arenosa: "Arenosa" };
+// Catálogo de culturas. "disponivel: true" = já tem tabela de recomendação
+// de verdade implementada. As demais aparecem no cadastro (pra já vir
+// pronto quando forem adicionadas), mas mostram um aviso na aba
+// Recomend. em vez de calcular algo — pra nunca mostrar um número de
+// adubação que não venha de uma fonte agronômica confiável.
+const CULTURAS = {
+    cafe_conilon: { id: "cafe_conilon", nome: "Café Conilon", emoji: "☕", unidadeProd: "sc/ha/ano", disponivel: true },
+    cafe_arabica: { id: "cafe_arabica", nome: "Café Arábica", emoji: "☕", unidadeProd: "sc/ha/ano", disponivel: false },
+    milho: { id: "milho", nome: "Milho", emoji: "🌽", unidadeProd: "sc/ha", disponivel: false },
+    soja: { id: "soja", nome: "Soja", emoji: "🌱", unidadeProd: "sc/ha", disponivel: false },
+    abacate: { id: "abacate", nome: "Abacate", emoji: "🥑", unidadeProd: "ton/ha/ano", disponivel: false },
+    banana: { id: "banana", nome: "Banana", emoji: "🍌", unidadeProd: "ton/ha/ano", disponivel: false },
+    cana: { id: "cana", nome: "Cana-de-açúcar", emoji: "🎋", unidadeProd: "ton/ha/ano", disponivel: false },
+    algodao: { id: "algodao", nome: "Algodão", emoji: "🌾", unidadeProd: "@/ha", disponivel: false },
+    arroz: { id: "arroz", nome: "Arroz", emoji: "🌾", unidadeProd: "sc/ha", disponivel: false },
+    laranja: { id: "laranja", nome: "Laranja", emoji: "🍊", unidadeProd: "cx/ha/ano", disponivel: false },
+    mandioca: { id: "mandioca", nome: "Mandioca", emoji: "🍠", unidadeProd: "ton/ha", disponivel: false },
+    feijao: { id: "feijao", nome: "Feijão", emoji: "🫘", unidadeProd: "sc/ha", disponivel: false },
+};
+function culturaDoTalhao(talhao) {
+    return CULTURAS[(talhao && talhao.cultura) || "cafe_conilon"] || CULTURAS.cafe_conilon;
+}
 function Field({ label, children }) {
     return (React.createElement("label", { className: "block mb-3" },
         React.createElement("span", { className: "block text-xs font-semibold tracking-wide text-stone-500 uppercase mb-1" }, label),
@@ -1489,6 +1511,8 @@ function SeletorProdutoEstoque({ compras, categoria, value, onChange, onProdutoS
 }
 /* ---- Formulário: novo talhão ---- */
 function TalhaoForm({ onSave, onClose, initial, tabelas }) {
+    const [cultura, setCultura] = useState(initial ? (initial.cultura || "cafe_conilon") : "cafe_conilon");
+    const infoCultura = CULTURAS[cultura];
     const [nome, setNome] = useState(initial ? initial.nome : "");
     const [modoArea, setModoArea] = useState(initial ? initial.modoArea : "direta");
     const [area, setArea] = useState(initial && initial.modoArea === "direta" ? String(initial.area) : "");
@@ -1508,6 +1532,10 @@ function TalhaoForm({ onSave, onClose, initial, tabelas }) {
     const areaFinal = modoArea === "direta" ? Number(area) || 0 : areaCalculada || 0;
     const valido = nome.trim() && areaFinal > 0 && produtividade;
     return (React.createElement(Modal, { title: initial ? "Editar talhão" : "Novo talhão", onClose: onClose },
+        React.createElement(Field, { label: "Cultura" },
+            React.createElement(ChoiceRow, { options: Object.values(CULTURAS).map((c) => [c.id, c.emoji + " " + c.nome]), value: cultura, onChange: setCultura, cols: 3 })),
+        !infoCultura.disponivel && (React.createElement("div", { className: "bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 text-xs text-amber-800" },
+            "A recomenda\u00E7\u00E3o de aduba\u00E7\u00E3o pronta pra ", infoCultura.nome, " ainda n\u00E3o est\u00E1 dispon\u00EDvel \u2014 em breve. Por enquanto, d\u00E1 pra cadastrar uma tabela pr\u00F3pria em Configura\u00E7\u00F5es \u2192 Tabelas de aduba\u00E7\u00E3o, com os n\u00FAmeros que seu agr\u00F4nomo passar.")),
         React.createElement(Field, { label: "Nome do talh\u00E3o" },
             React.createElement("input", { className: inputCls, placeholder: "Ex: Talh\u00E3o 1 - Baixada", value: nome, onChange: (e) => setNome(e.target.value) })),
         React.createElement(Field, { label: "Como calcular a \u00E1rea?" },
@@ -1540,16 +1568,17 @@ function TalhaoForm({ onSave, onClose, initial, tabelas }) {
             React.createElement(ChoiceRow, { options: Object.entries(TEXTURA_LABEL), value: textura, onChange: setTextura })),
         React.createElement(Field, { label: "Sistema" },
             React.createElement(ChoiceRow, { options: [["sequeiro", "Sequeiro"], ["irrigado", "Irrigado"]], value: sistema, onChange: setSistema })),
-        React.createElement(Field, { label: "Produtividade m\u00E9dia esperada (sc/ha/ano)" },
+        React.createElement(Field, { label: `Produtividade m\u00E9dia esperada (${infoCultura.unidadeProd})` },
             React.createElement(NumInput, { placeholder: "Ex: 45", value: produtividade, onChange: (e) => setProdutividade(e.target.value) })),
-        React.createElement(Field, { label: "Tabela de refer\u00EAncia para aduba\u00E7\u00E3o" },
+        infoCultura.disponivel ? (React.createElement(Field, { label: "Tabela de refer\u00EAncia para aduba\u00E7\u00E3o" },
             React.createElement("div", { className: "space-y-2" }, Object.values(tabelasDisponiveis).map((t) => (React.createElement("button", { key: t.id, type: "button", onClick: () => setTabela(t.id), className: `w-full text-left rounded-lg border p-3 ${tabela === t.id ? "border-[#4c6146] bg-[#e7ebdd]" : "border-stone-300 bg-white"}` },
                 React.createElement("p", { className: "text-sm font-semibold text-stone-800 flex items-center gap-1.5" },
                     t.nome,
                     t.customizada && React.createElement("span", { className: "text-[10px] font-semibold uppercase tracking-wide text-[#8a6d3b] bg-[#f2e8d8] rounded-full px-1.5 py-0.5" }, "Sua tabela")),
-                React.createElement("p", { className: "text-xs text-stone-500" }, t.resumo)))))),
+                React.createElement("p", { className: "text-xs text-stone-500" }, t.resumo))))))) : null,
         React.createElement(PrimaryBtn, { disabled: !valido, onClick: () => onSave({
                 id: initial ? initial.id : uid(),
+                cultura,
                 nome: nome.trim(),
                 area: areaFinal,
                 modoArea,
@@ -2837,6 +2866,13 @@ function CartaoCalagem({ analise, area, talhao, talhoes, onAddAdubacaoEmLote }) 
         }))));
 }
 function CartaoRecomendacao({ talhao, talhoes, analise, adubacoes, agendamentos, tabelas, onAddAdubacaoEmLote }) {
+    const infoCultura = culturaDoTalhao(talhao);
+    if (!infoCultura.disponivel) {
+        return (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-5 text-center" },
+            React.createElement("div", { className: "text-3xl mb-2" }, infoCultura.emoji),
+            React.createElement("p", { className: "font-semibold text-stone-800 mb-1" }, "Recomenda\u00E7\u00E3o pra ", infoCultura.nome, " chegando em breve"),
+            React.createElement("p", { className: "text-sm text-stone-500" }, "Ainda estamos organizando as tabelas oficiais de aduba\u00E7\u00E3o pra essa cultura. Enquanto isso, voc\u00EA pode cadastrar uma tabela pr\u00F3pria em Configura\u00E7\u00F5es \u2192 Tabelas de aduba\u00E7\u00E3o, com os n\u00FAmeros que seu agr\u00F4nomo passar, e usar ela nesse talh\u00E3o.")));
+    }
     if (!analise) {
         return (React.createElement("div", { className: "bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 flex gap-2" },
             React.createElement(Icon, { name: "alert", size: 18, className: "shrink-0 mt-0.5" }),
@@ -4898,17 +4934,18 @@ function AcaoTile({ icon, cor, corFundo, label, onClick, full }) {
         React.createElement("span", { className: "text-sm font-semibold text-stone-700" }, label)));
 }
 function TalhaoCard({ talhao, ultimaAnalise, onOpen, onEdit, onDelete }) {
+    const infoCultura = culturaDoTalhao(talhao);
     return (React.createElement("div", { className: "w-full bg-white rounded-2xl shadow-sm p-4 flex items-center gap-3" },
         React.createElement("button", { onClick: onOpen, className: "flex-1 min-w-0 flex items-center gap-3 text-left" },
-            React.createElement("div", { className: "w-10 h-10 rounded-full bg-[#e7ebdd] text-[#33422e] flex items-center justify-center shrink-0" },
-                React.createElement(Icon, { name: "mapPin", size: 18 })),
+            React.createElement("div", { className: "w-10 h-10 rounded-full bg-[#e7ebdd] text-[#33422e] flex items-center justify-center shrink-0 text-lg" },
+                infoCultura.emoji),
             React.createElement("div", { className: "flex-1 min-w-0" },
                 React.createElement("p", { className: "font-semibold text-stone-800 truncate" }, talhao.nome),
                 React.createElement("p", { className: "text-xs text-stone-500" },
                     fmtBR(talhao.area, 2),
                     " ha \u00B7 ",
                     talhao.produtividade,
-                    " sc/ha esperado"),
+                    " ", infoCultura.unidadeProd, " esperado"),
                 React.createElement("p", { className: "text-xs mt-0.5" }, ultimaAnalise ? (React.createElement("span", { className: "text-[#4c6146]" },
                     "An\u00E1lise em ",
                     new Date(ultimaAnalise.data + "T00:00:00").toLocaleDateString("pt-BR"))) : (React.createElement("span", { className: "text-amber-600" }, "Sem an\u00E1lise de solo"))),
