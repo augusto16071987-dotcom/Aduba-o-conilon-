@@ -195,6 +195,7 @@ const TABELAS = {
         id: "procafe",
         nome: "Fundação Procafé",
         resumo: "Fórmula por extração — N, P₂O₅ e K₂O, ajustada pela análise",
+        culturas: ["cafe_conilon"],
         fonte: "Funda\u00E7\u00E3o Proc\u00E1f\u00E9/MAPA \u2014 f\u00F3rmula de extra\u00E7\u00E3o por saca (N: ~6,2 kg/sc em sequeiro ou ~7,5 kg/sc irrigado; P\u2082O\u2085: ~0,6 kg/sc; K\u2082O: ~5,9 kg/sc), j\u00E1 na faixa que a pr\u00F3pria Funda\u00E7\u00E3o costuma indicar. Dose de N n\u00E3o depende do solo (s\u00F3 da produtividade esperada); P\u2082O\u2085 e K\u2082O s\u00E3o reduzidos conforme o teor j\u00E1 dispon\u00EDvel no solo (micronutrientes seguem a mesma refer\u00EAncia da tabela Embrapa, que n\u00E3o muda por fonte de N/P/K). Refer\u00EAncia hist\u00F3rica desenvolvida majoritariamente com caf\u00E9 ar\u00E1bica \u2014 os n\u00FAmeros aqui s\u00E3o uma aproxima\u00E7\u00E3o das f\u00F3rmulas publicadas, n\u00E3o a tabela oficial completa; em produtividades muito altas (acima de ~70 sc/ha) os totais podem ficar bem elevados porque a f\u00F3rmula \u00E9 linear \u2014 compare sempre com a INCAPER-ES e um agr\u00F4nomo antes de aplicar.",
         formula: true,
         faixasK: ["<60", "60-120", "121-200", ">200"],
@@ -205,6 +206,7 @@ const TABELAS = {
         id: "embrapa_pa",
         nome: "Embrapa (Prezotti et al., 2015)",
         resumo: "Completa: N, P₂O₅, K₂O e micronutrientes",
+        culturas: ["cafe_conilon"],
         fonte: "EMBRAPA — adaptação de Prezotti et al. (2015), extrator Mehlich-1.",
         faixasProdLabel: ["<20", "21-30", "31-50", "51-70", ">70"],
         faixasK: ["<60", "60-120", "121-200", ">200"],
@@ -231,6 +233,7 @@ const TABELAS = {
         id: "incaper_es",
         nome: "INCAPER-ES (Prezotti et al., 2007)",
         resumo: "Clássica do Espírito Santo — N e K₂O",
+        culturas: ["cafe_conilon"],
         fonte: "INCAPER-ES — Prezotti et al. (2007), 5ª aproximação, extrator Mehlich-1.",
         faixasProdLabel: ["20-30", "31-50", "51-70", "71-100", "101-130", "131-170", ">170"],
         faixasK: ["<60", "60-120", "120-200", ">200"],
@@ -248,6 +251,51 @@ const TABELAS = {
         classeProdutividade: (sc) => sc <= 30 ? 0 : sc <= 50 ? 1 : sc <= 70 ? 2 : sc <= 100 ? 3 : sc <= 130 ? 4 : sc <= 170 ? 5 : 6,
         temP: false,
         temMicro: false,
+    },
+    boletim100_arabica: {
+        id: "boletim100_arabica",
+        nome: "Boletim 100 — IAC (café arábica)",
+        resumo: "Café Arábica — N, P₂O₅, K₂O, B e Zn (exige laudo por Resina)",
+        culturas: ["cafe_arabica"],
+        fonte: "Instituto Agronômico de Campinas (IAC) — Quaggio et al. (2022), Boletim 100: Recomendações de Adubação e Calagem para o Estado de São Paulo, p. 165-176. Doses de N também consideram a análise foliar (se informada; sem ela, assume faixa \"adequado\"). Micronutrientes B e Zn usam os valores da coluna \"porte alto\" da tabela original (a maioria das cultivares tradicionais de arábica). Cu e Mn não têm tabela de dose por teor de solo nessa fonte — o Boletim recomenda pulverização foliar só quando há sintoma visual de deficiência, então não são calculados aqui. IMPORTANTE: essa tabela foi calibrada pro Sistema IAC de análise de solo (extrator Resina) — só funciona certo com uma análise marcada como \"Resina\"; com laudo Mehlich-1, os teores de P e K não são compará­veis e o app avisa em vez de calcular.",
+        extratorEsperado: "resina",
+        faixasProdLabel: ["<20", "20-30", "30-40", "40-50", "50-60", "60-70", "70-80", ">80"],
+        classeProdutividade: (sc) => sc < 20 ? 0 : sc <= 30 ? 1 : sc <= 40 ? 2 : sc <= 50 ? 3 : sc <= 60 ? 4 : sc <= 70 ? 5 : sc <= 80 ? 6 : 7,
+        temNFoliar: true,
+        doseN: [
+            [160, 140, 120],
+            [180, 160, 140],
+            [220, 200, 160],
+            [260, 220, 180],
+            [300, 240, 200],
+            [350, 260, 220],
+            [400, 300, 240],
+            [450, 350, 240],
+        ],
+        temP: true,
+        doseP2O5: [
+            [20, 20, 20],
+            [40, 20, 20],
+            [60, 40, 20],
+            [80, 60, 40],
+            [80, 60, 40],
+            [100, 80, 60],
+            [120, 80, 60],
+            [140, 100, 60],
+        ],
+        doseK2O: [
+            [160, 100, 60],
+            [180, 120, 80],
+            [200, 140, 100],
+            [240, 180, 120],
+            [280, 200, 160],
+            [360, 280, 180],
+            [400, 300, 200],
+            [450, 320, 220],
+        ],
+        temMicro: true,
+        temCuMn: false,
+        microThresholds: { zn: [5.0, 10.0, 3.0, 2.0], b: [0.6, 1.0, 3.0, 2.0] },
     },
 };
 const FAIXAS_P_LABEL = ["Muito baixo", "Baixo", "Médio", "Alto"];
@@ -282,6 +330,33 @@ function doseMicro(valor, baixo, medio, doseBaixo, doseMedio) {
     if (valor <= medio)
         return doseMedio;
     return 0;
+}
+// Classificação de P e K pelo Sistema IAC (extrator Resina) — usada pelo
+// Boletim 100. É uma escala DIFERENTE da Mehlich-1 (classeP/classeK acima),
+// por isso não dá pra misturar: um laudo Mehlich-1 tem que usar classeP/
+// classeK; um laudo Resina tem que usar estas aqui.
+function classeP_resina(p) {
+    if (p < 16)
+        return 0;
+    if (p <= 40)
+        return 1;
+    return 2;
+}
+function classeK_resina(k) {
+    if (k < 1.6)
+        return 0;
+    if (k <= 3)
+        return 1;
+    return 2;
+}
+function classeNFoliar(n) {
+    if (n == null)
+        return 1; // sem análise foliar informada — assume faixa "adequado"
+    if (n < 25)
+        return 0;
+    if (n <= 30)
+        return 1;
+    return 2;
 }
 function calcularRecomendacao(talhao, analise, tabelasDisponiveis) {
     const tabelas = tabelasDisponiveis || TABELAS;
@@ -340,27 +415,37 @@ function calcularRecomendacao(talhao, analise, tabelasDisponiveis) {
             },
         };
     }
+    // Tabelas que exigem laudo pelo Sistema IAC (resina) — se a última
+    // análise não foi marcada como "resina", os teores de P/K não são
+    // comparáveis com essa tabela. Em vez de calcular algo errado, avisa.
+    if (tabela.extratorEsperado && (analise.extrator || "mehlich1") !== tabela.extratorEsperado) {
+        return { erroExtrator: true, tabela, extratorEsperado: tabela.extratorEsperado, extratorInformado: analise.extrator || "mehlich1" };
+    }
+    const usaResina = tabela.extratorEsperado === "resina";
+    const classeKFn = usaResina ? classeK_resina : classeK;
+    const classeKLabelFn = (i) => usaResina ? ["<1,6", "1,6-3,0", ">3,0"][i] : FAIXAS_K_LABEL[i];
+    const mt = tabela.microThresholds || { zn: [2.0, 6.0, 3.0, 2.0], cu: [0.5, 1.5, 3.0, 2.0], mn: [5.0, 15.0, 15.0, 10.0], b: [0.2, 0.6, 2.0, 1.0] };
     const iProd = tabela.classeProdutividade(talhao.produtividade);
-    const iK = classeK(analise.k);
-    const n = tabela.doseN[iProd];
+    const iK = classeKFn(analise.k);
+    const n = tabela.temNFoliar ? tabela.doseN[iProd][classeNFoliar(analise.nFoliar)] : tabela.doseN[iProd];
     const k2o = tabela.doseK2O[iProd][iK];
     let p2o5 = null;
     let classeProdutividadeP = null;
     if (tabela.temP) {
-        const iP = classeP(analise.p, talhao.textura);
+        const iP = usaResina ? classeP_resina(analise.p) : classeP(analise.p, talhao.textura);
         p2o5 = tabela.doseP2O5[iProd][iP];
-        classeProdutividadeP = FAIXAS_P_LABEL[iP];
+        classeProdutividadeP = usaResina ? ["<16", "16-40", ">40"][iP] : FAIXAS_P_LABEL[iP];
     }
-    const zn = tabela.temMicro && analise.zn != null ? doseMicro(analise.zn, 2.0, 6.0, 3.0, 2.0) : null;
-    const cu = tabela.temMicro && analise.cu != null ? doseMicro(analise.cu, 0.5, 1.5, 3.0, 2.0) : null;
-    const mn = tabela.temMicro && analise.mn != null ? doseMicro(analise.mn, 5.0, 15.0, 15.0, 10.0) : null;
-    const b = tabela.temMicro && analise.b != null ? doseMicro(analise.b, 0.2, 0.6, 2.0, 1.0) : null;
+    const zn = tabela.temMicro && analise.zn != null ? doseMicro(analise.zn, mt.zn[0], mt.zn[1], mt.zn[2], mt.zn[3]) : null;
+    const cu = tabela.temMicro && tabela.temCuMn !== false && analise.cu != null ? doseMicro(analise.cu, mt.cu[0], mt.cu[1], mt.cu[2], mt.cu[3]) : null;
+    const mn = tabela.temMicro && tabela.temCuMn !== false && analise.mn != null ? doseMicro(analise.mn, mt.mn[0], mt.mn[1], mt.mn[2], mt.mn[3]) : null;
+    const b = tabela.temMicro && analise.b != null ? doseMicro(analise.b, mt.b[0], mt.b[1], mt.b[2], mt.b[3]) : null;
     const s = analise.sBaixo ? 50 : 0;
     return {
         tabela,
         classes: {
             produtividade: tabela.faixasProdLabel[iProd],
-            k: tabela.faixasK[iK],
+            k: classeKLabelFn(iK),
             p: classeProdutividadeP,
         },
         porHa: { n, p2o5, k2o, zn, cu, mn, b, s },
@@ -1329,7 +1414,7 @@ const TEXTURA_LABEL = { argilosa: "Argilosa", media: "Média", arenosa: "Arenosa
 // adubação que não venha de uma fonte agronômica confiável.
 const CULTURAS = {
     cafe_conilon: { id: "cafe_conilon", nome: "Café Conilon", emoji: "☕", unidadeProd: "sc/ha/ano", disponivel: true },
-    cafe_arabica: { id: "cafe_arabica", nome: "Café Arábica", emoji: "☕", unidadeProd: "sc/ha/ano", disponivel: false },
+    cafe_arabica: { id: "cafe_arabica", nome: "Café Arábica", emoji: "☕", unidadeProd: "sc/ha/ano", disponivel: true },
     milho: { id: "milho", nome: "Milho", emoji: "🌽", unidadeProd: "sc/ha", disponivel: false },
     soja: { id: "soja", nome: "Soja", emoji: "🌱", unidadeProd: "sc/ha", disponivel: false },
     abacate: { id: "abacate", nome: "Abacate", emoji: "🥑", unidadeProd: "ton/ha/ano", disponivel: false },
@@ -1525,7 +1610,14 @@ function TalhaoForm({ onSave, onClose, initial, tabelas }) {
     const [sistema, setSistema] = useState(initial ? initial.sistema : "sequeiro");
     const [produtividade, setProdutividade] = useState(initial ? String(initial.produtividade) : "");
     const [tabela, setTabela] = useState(initial ? initial.tabela : "procafe");
-    const tabelasDisponiveis = tabelas || TABELAS;
+    const tabelasDisponiveis = Object.fromEntries(Object.entries(tabelas || TABELAS)
+        .filter(([, t]) => t.customizada || !t.culturas || t.culturas.includes(cultura)));
+    useEffect(() => {
+        if (!tabelasDisponiveis[tabela]) {
+            const primeira = Object.keys(tabelasDisponiveis)[0];
+            if (primeira) setTabela(primeira);
+        }
+    }, [cultura]);
     const areaCalculada = modoArea === "espacamento" && entrelinha && espPlanta && numPlantas
         ? (Number(entrelinha) * Number(espPlanta) * Number(numPlantas)) / 10000
         : null;
@@ -1600,8 +1692,10 @@ function TalhaoForm({ onSave, onClose, initial, tabelas }) {
 /* ---- Formulário: nova análise de solo ---- */
 function AnaliseForm({ onSave, onClose, initial }) {
     const [data, setData] = useState(initial ? initial.data : new Date().toISOString().slice(0, 10));
+    const [extrator, setExtrator] = useState(initial ? (initial.extrator || "mehlich1") : "mehlich1");
     const [p, setP] = useState(initial ? String(initial.p) : "");
     const [k, setK] = useState(initial ? String(initial.k) : "");
+    const [nFoliar, setNFoliar] = useState(initial && initial.nFoliar != null ? String(initial.nFoliar) : "");
     const [ph, setPh] = useState(initial && initial.ph != null ? String(initial.ph) : "");
     const [ca, setCa] = useState(initial && initial.ca != null ? String(initial.ca) : "");
     const [mg, setMg] = useState(initial && initial.mg != null ? String(initial.mg) : "");
@@ -1686,11 +1780,16 @@ function AnaliseForm({ onSave, onClose, initial }) {
             mostrarTextoDebug && React.createElement("pre", { className: "text-[9px] text-stone-500 bg-stone-50 rounded-lg p-2 mt-1 whitespace-pre-wrap break-words max-h-40 overflow-y-auto" }, textoExtraidoDebug))),
         React.createElement(Field, { label: "Data da coleta" },
             React.createElement("input", { type: "date", className: inputCls, value: data, onChange: (e) => setData(e.target.value) })),
+        React.createElement(Field, { label: "M\u00E9todo do laborat\u00F3rio (extrator)" },
+            React.createElement(ChoiceRow, { options: [["mehlich1", "Mehlich-1"], ["resina", "Resina (Sistema IAC)"]], value: extrator, onChange: setExtrator })),
+        React.createElement("p", { className: "text-[11px] text-stone-400 -mt-2 mb-3" }, "Olha no cabe\u00E7alho do laudo do laborat\u00F3rio \u2014 na d\u00FAvida, Mehlich-1 \u00E9 o mais comum em ES/MG. Isso muda como o app interpreta os teores de P e K."),
         React.createElement("div", { className: "grid grid-cols-2 gap-3" },
             React.createElement(Field, { label: "P (mg/dm\u00B3) *" },
                 React.createElement(NumInput, { placeholder: "Ex: 8", value: p, onChange: (e) => setP(e.target.value) })),
-            React.createElement(Field, { label: "K (mg/dm\u00B3) *" },
-                React.createElement(NumInput, { placeholder: "Ex: 90", value: k, onChange: (e) => setK(e.target.value) })),
+            React.createElement(Field, { label: extrator === "resina" ? "K (mmolc/dm\u00B3) *" : "K (mg/dm\u00B3) *" },
+                React.createElement(NumInput, { placeholder: extrator === "resina" ? "Ex: 2.3" : "Ex: 90", value: k, onChange: (e) => setK(e.target.value) })),
+            React.createElement(Field, { label: "N foliar (g/kg) \u2014 opcional" },
+                React.createElement(NumInput, { placeholder: "Ex: 27", value: nFoliar, onChange: (e) => setNFoliar(e.target.value) })),
             React.createElement(Field, { label: "pH" },
                 React.createElement(NumInput, { placeholder: "Ex: 5.8", value: ph, onChange: (e) => setPh(e.target.value) })),
             React.createElement(Field, { label: "M.O. (dag/kg)" },
@@ -1718,7 +1817,8 @@ function AnaliseForm({ onSave, onClose, initial }) {
         React.createElement(Field, { label: "Observa\u00E7\u00F5es" },
             React.createElement("textarea", { className: inputCls, rows: 2, placeholder: "Alguma anota\u00E7\u00E3o extra (opcional)", value: obs, onChange: (e) => setObs(e.target.value) })),
         React.createElement(PrimaryBtn, { disabled: !valido, onClick: () => onSave({
-                id: initial ? initial.id : uid(), data, p: Number(p), k: Number(k),
+                id: initial ? initial.id : uid(), data, extrator, p: Number(p), k: Number(k),
+                nFoliar: nFoliar !== "" ? Number(nFoliar) : null,
                 ph: ph !== "" ? Number(ph) : null, ca: ca !== "" ? Number(ca) : null,
                 mg: mg !== "" ? Number(mg) : null, mo: mo !== "" ? Number(mo) : null,
                 zn: zn !== "" ? Number(zn) : null, cu: cu !== "" ? Number(cu) : null,
@@ -2879,6 +2979,13 @@ function CartaoRecomendacao({ talhao, talhoes, analise, adubacoes, agendamentos,
             "Cadastre uma an\u00E1lise de solo para gerar a recomenda\u00E7\u00E3o de aduba\u00E7\u00E3o deste talh\u00E3o."));
     }
     const r = calcularRecomendacao(talhao, analise, tabelas);
+    if (r.erroExtrator) {
+        const nomeExtrator = (x) => x === "resina" ? "Resina (Sistema IAC)" : "Mehlich-1";
+        return (React.createElement("div", { className: "bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 flex gap-2" },
+            React.createElement(Icon, { name: "alert", size: 18, className: "shrink-0 mt-0.5" }),
+            React.createElement("span", null,
+                "A tabela ", r.tabela.nome, " precisa de um laudo pelo m\u00E9todo ", nomeExtrator(r.extratorEsperado), ", mas a \u00FAltima an\u00E1lise cadastrada foi marcada como ", nomeExtrator(r.extratorInformado), ". Edite a an\u00E1lise de solo e ajuste o campo \"M\u00E9todo do laborat\u00F3rio\", ou cadastre uma nova an\u00E1lise com o m\u00E9todo certo.")));
+    }
     const aplicado = calcularAplicado(adubacoes, talhao.area);
     const previsto = calcularPrevisto(agendamentos, talhao.area);
     const linha = (label, unidade, porHa, total) => porHa == null ? null : (React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100 last:border-0" },
