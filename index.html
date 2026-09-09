@@ -793,6 +793,36 @@ function TelaAssinatura({ onAtivado }) {
     const [erro, setErro] = useState("");
     const [enviando, setEnviando] = useState(false);
     const [verificando, setVerificando] = useState(false);
+    // Recuperar acesso: pra quando o cliente já assinou antes (em outro
+    // aparelho, ou depois de limpar os dados) e só precisa reconectar,
+    // sem passar pelo Mercado Pago de novo.
+    const [mostrarRecuperar, setMostrarRecuperar] = useState(false);
+    const [emailRecuperar, setEmailRecuperar] = useState("");
+    const [recuperando, setRecuperando] = useState(false);
+    const [erroRecuperar, setErroRecuperar] = useState("");
+    const recuperarAcesso = async () => {
+        if (!emailRecuperar.trim()) return;
+        setRecuperando(true);
+        setErroRecuperar("");
+        try {
+            const res = await fetch("/.netlify/functions/recuperar-assinatura", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email: emailRecuperar.trim(), clienteId }),
+            });
+            const dados = await res.json();
+            if (!res.ok || !dados.ok) {
+                setErroRecuperar(dados.erro || "Não consegui recuperar agora. Tente de novo.");
+                setRecuperando(false);
+                return;
+            }
+            salvarAtivacao({ clienteId, nome: dados.nome, email: dados.email, status: "authorized", ativadoEm: new Date().toISOString(), preapprovalId: dados.preapprovalId, validoAte: dados.validoAte || null });
+            onAtivado();
+        } catch (e) {
+            setErroRecuperar("Não foi possível conectar agora. Confira sua internet e tente de novo.");
+        }
+        setRecuperando(false);
+    };
     const statusAtual = registroAnterior ? registroAnterior.status : null;
     const cancelada = statusAtual === "cancelled" || statusAtual === "paused";
     const conferirAgora = async () => {
@@ -874,6 +904,14 @@ function TelaAssinatura({ onAtivado }) {
             erro && React.createElement("p", { className: "text-xs text-[#a8442f] mb-2" }, erro),
             React.createElement("button", { onClick: comecarTeste, disabled: !nome.trim() || !email.trim() || enviando, className: "w-full mt-2 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, enviando ? "Preparando..." : "Come\u00E7ar teste gr\u00E1tis de 30 dias"),
             React.createElement("p", { className: "text-[11px] text-stone-400 text-center mt-2" }, "Voc\u00EA vai ser levado ao Mercado Pago pra cadastrar um cart\u00E3o v\u00E1lido. Nada \u00E9 cobrado nos primeiros 30 dias."),
+            !mostrarRecuperar ? (
+                React.createElement("button", { onClick: () => setMostrarRecuperar(true), className: "w-full text-center text-xs text-[#4c6146] font-semibold mt-4 underline" }, "J\u00E1 \u00E9 assinante? Recuperar acesso")
+            ) : (
+                React.createElement("div", { className: "mt-4 bg-[#f2ece0] rounded-lg p-3" },
+                    React.createElement("p", { className: "text-xs font-semibold text-stone-600 mb-2" }, "Digite o e-mail que voc\u00EA usou pra assinar \u2014 a gente reconecta seu acesso, sem precisar assinar de novo."),
+                    React.createElement("input", { type: "email", className: inputCls + " mb-2", placeholder: "seu@email.com", value: emailRecuperar, onChange: (e) => { setEmailRecuperar(e.target.value); setErroRecuperar(""); }, disabled: recuperando }),
+                    erroRecuperar && React.createElement("p", { className: "text-xs text-[#a8442f] mb-2" }, erroRecuperar),
+                    React.createElement("button", { onClick: recuperarAcesso, disabled: !emailRecuperar.trim() || recuperando, className: "w-full bg-[#33422e] text-white font-semibold rounded-lg py-2.5 text-sm disabled:opacity-40" }, recuperando ? "Verificando..." : "Recuperar acesso"))),
             React.createElement("a", { href: linkWhatsApp("Olá! Tenho uma dúvida sobre a assinatura do NutriCafé."), target: "_blank", rel: "noopener noreferrer", className: "w-full mt-4 flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold" },
                 React.createElement(Icon, { name: "whatsapp", size: 17 }),
                 " Falar no WhatsApp"))));
@@ -4828,6 +4866,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
         { id: "assinatura", titulo: "Assinatura", itens: [
             ["30 dias gr\u00E1tis", "Ao assinar, voc\u00EA tem 30 dias pra usar o app sem nenhuma cobran\u00E7a. O cart\u00E3o \u00E9 cadastrado direto na p\u00E1gina segura do Mercado Pago \u2014 o NutriCaf\u00E9 nunca v\u00EA nem guarda o n\u00FAmero do seu cart\u00E3o."],
             ["Depois do per\u00EDodo gr\u00E1tis", "A cobran\u00E7a de R$ 9,99 passa a ser feita automaticamente todo m\u00EAs, no cart\u00E3o cadastrado, sem precisar fazer nada. D\u00E1 pra cancelar quando quiser, direto pelo Mercado Pago."],
+            ["Troquei de celular / limpei os dados \u2014 perdi o acesso?", "Na tela de assinatura, toque em \"J\u00E1 \u00E9 assinante? Recuperar acesso\" e digite o mesmo e-mail usado na assinatura original. O app reconecta seu acesso na hora, sem precisar assinar de novo nem passar pelo Mercado Pago outra vez."],
             ["Problema com o cart\u00E3o ou pagamento por fora", "Se o cart\u00E3o n\u00E3o for aprovado, ou se combinou o pagamento de outro jeito (PIX, por exemplo), entre em contato pelo e-mail de suporte \u2014 o acesso pode ser liberado manualmente enquanto isso se resolve."],
         ] },
         { id: "dados", titulo: "Seus dados e backup", itens: [
