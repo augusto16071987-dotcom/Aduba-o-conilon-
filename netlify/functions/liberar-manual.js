@@ -99,7 +99,7 @@ exports.handler = async (event) => {
         return { statusCode: 400, body: JSON.stringify({ erro: "Corpo da requisição inválido." }) };
     }
 
-    const { senha, nome, meses } = corpo;
+    const { senha, nome, email, meses } = corpo;
     if (senha !== SENHA_ADMIN) {
         return { statusCode: 401, body: JSON.stringify({ erro: "Senha incorreta." }) };
     }
@@ -114,19 +114,27 @@ exports.handler = async (event) => {
     try {
         const registros = await listarRegistrosDeAssinatura();
         const busca = normalizar(nome);
-        const encontrados = registros.filter((r) => normalizar(r.nome).indexOf(busca) !== -1);
+        let encontrados = registros.filter((r) => normalizar(r.nome).indexOf(busca) !== -1);
+
+        // Se veio e-mail junto, usa ele pra desempatar quando tem mais de
+        // um cliente com nome igual/parecido.
+        const buscaEmail = normalizar(email);
+        if (buscaEmail) {
+            const comEmail = encontrados.filter((r) => normalizar(r.email) === buscaEmail);
+            if (comEmail.length > 0) encontrados = comEmail;
+        }
 
         if (encontrados.length === 0) {
             return {
                 statusCode: 404,
-                body: JSON.stringify({ erro: "Nenhum cliente encontrado com esse nome. Ele precisa ter aberto a tela de assinatura no app pelo menos uma vez." }),
+                body: JSON.stringify({ erro: "Nenhum cliente encontrado com esse nome (e e-mail, se informado). Ele precisa ter aberto a tela de assinatura no app pelo menos uma vez." }),
             };
         }
         if (encontrados.length > 1) {
             return {
                 statusCode: 409,
                 body: JSON.stringify({
-                    erro: "Mais de um cliente encontrado. Seja mais específico.",
+                    erro: "Mais de um cliente encontrado com esse nome. Informe também o e-mail pra identificar certo.",
                     opcoes: encontrados.map((r) => ({ nome: r.nome, email: r.email })),
                 }),
             };
