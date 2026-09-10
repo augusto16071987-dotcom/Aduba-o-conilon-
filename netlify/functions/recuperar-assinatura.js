@@ -72,6 +72,8 @@ async function listarRegistrosDeAssinatura() {
                 status: f.status ? f.status.stringValue : "",
                 preapprovalId: f.preapprovalId ? f.preapprovalId.stringValue : "",
                 validoAte: f.validoAte ? f.validoAte.stringValue : null,
+                proximaCobranca: f.proximaCobranca ? f.proximaCobranca.stringValue : null,
+                liberadoManualmente: f.liberadoManualmente ? !!f.liberadoManualmente.booleanValue : false,
                 atualizadoEm: f.atualizadoEm ? f.atualizadoEm.stringValue : "",
             });
         }
@@ -127,6 +129,10 @@ exports.handler = async (event) => {
             campos.validoAte = { stringValue: encontrado.validoAte };
             mask += "&updateMask.fieldPaths=validoAte";
         }
+        if (encontrado.proximaCobranca) {
+            campos.proximaCobranca = { stringValue: encontrado.proximaCobranca };
+            mask += "&updateMask.fieldPaths=proximaCobranca";
+        }
 
         const token = await obterTokenAdmin();
         await fetch(baseUrl() + "/" + docIdAtual + mask, {
@@ -143,6 +149,8 @@ exports.handler = async (event) => {
                 email: encontrado.email,
                 preapprovalId: encontrado.preapprovalId,
                 validoAte: encontrado.validoAte,
+                proximaCobranca: encontrado.proximaCobranca,
+                liberadoManualmente: encontrado.liberadoManualmente,
             }),
         };
     } catch (e) {
