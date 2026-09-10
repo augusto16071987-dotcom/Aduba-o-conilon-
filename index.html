@@ -2617,6 +2617,24 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
     const [precoUnitario, setPrecoUnitario] = useState(initial && initial.quantidade ? String((Number(initial.valorTotal) / Number(initial.quantidade)).toFixed(2)) : "");
     const [pesoSaco, setPesoSaco] = useState(initial && initial.pesoSaco != null ? String(initial.pesoSaco) : "50");
     const [obs, setObs] = useState(initial ? initial.obs || "" : "");
+    const [fotoBase64, setFotoBase64] = useState(initial ? initial.fotoBase64 || null : null);
+    const [enviandoFoto, setEnviandoFoto] = useState(false);
+    const [erroFoto, setErroFoto] = useState("");
+    const fotoInputRef = useRef(null);
+    const escolherFoto = async (e) => {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = "";
+        if (!file) return;
+        setErroFoto("");
+        setEnviandoFoto(true);
+        try {
+            const dados = await comprimirImagem(file, 700 * 1024);
+            setFotoBase64(dados);
+        } catch (err) {
+            setErroFoto(err.message || "N\u00E3o consegui processar essa foto.");
+        }
+        setEnviandoFoto(false);
+    };
     const nutrienteInicial = (key) => (initial && initial[key] != null ? String(initial[key]) : "");
     const [n, setN] = useState(nutrienteInicial("n"));
     const [p2o5, setP2o5] = useState(nutrienteInicial("p2o5"));
@@ -2726,6 +2744,18 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
             qtdSelecionados > 1 && valorPorTalhaoRateio != null && (React.createElement("p", { className: "text-xs text-[#8a6d3b] mt-2" },
                 ratear ? `Dividido igualmente: R$ ${fmtBR(valorPorTalhaoRateio, 2)} por talh\u00E3o.` : `R$ ${fmtBR(valorPorTalhaoRateio, 2)} lan\u00E7ado em cada talh\u00E3o (total: R$ ${fmtBR(valorPorTalhaoRateio * qtdSelecionados, 2)}).`)),
             qtdSelecionados === 0 && (React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "Nenhuma despesa ser\u00E1 lan\u00E7ada agora \u2014 s\u00F3 vai pro estoque.")))),
+        React.createElement(Field, { label: "Foto do produto (opcional)" },
+            React.createElement("input", { ref: fotoInputRef, type: "file", accept: "image/*", capture: "environment", className: "hidden", onChange: escolherFoto }),
+            !fotoBase64 ? (
+                React.createElement("button", { type: "button", onClick: () => fotoInputRef.current && fotoInputRef.current.click(), disabled: enviandoFoto, className: "w-full flex items-center justify-center gap-2 border-2 border-dashed border-stone-300 text-stone-500 rounded-lg py-4 text-sm" },
+                    React.createElement(Icon, { name: "clipboard", size: 16 }),
+                    enviandoFoto ? "Processando..." : "Tirar ou escolher foto")
+            ) : (
+                React.createElement("div", { className: "relative inline-block" },
+                    React.createElement("img", { src: fotoBase64, className: "h-28 w-28 object-cover rounded-lg border border-stone-200" }),
+                    React.createElement("button", { type: "button", onClick: () => setFotoBase64(null), className: "absolute -top-2 -right-2 bg-[#a8442f] text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow" }, "\u2715"))
+            ),
+            erroFoto && React.createElement("p", { className: "text-xs text-[#a8442f] mt-1" }, erroFoto)),
         React.createElement(Field, { label: "Observa\u00E7\u00F5es" },
             React.createElement("textarea", { className: inputCls, rows: 2, placeholder: "Alguma anota\u00E7\u00E3o extra (opcional)", value: obs, onChange: (e) => setObs(e.target.value) })),
         React.createElement("p", { className: "text-xs text-stone-400 mb-3 -mt-1" }, "Esse pre\u00E7o e composi\u00E7\u00E3o s\u00E3o usados automaticamente quando voc\u00EA registrar o uso desse mesmo produto (pelo nome) em algum talh\u00E3o."),
@@ -2739,7 +2769,7 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
                 const compraObj = {
                     id: initial ? initial.id : uid(), data, categoria, produto: produto.trim(), formulacao: formulacao.trim(),
                     quantidade: Number(quantidade), unidade, pesoSaco: (unidade === "sacos" || unidade === "galoes") ? Number(pesoSaco) : null, valorTotal: total, obs: obs.trim(),
-                    mostrarEstoque,
+                    mostrarEstoque, fotoBase64: fotoBase64 || null,
                     ...nutrientesSalvos,
                 };
                 if (mostrarSeletorSetor && qtdSelecionados > 0) {
@@ -4334,8 +4364,11 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos,
                 ano,
                 ".")),
             comprasDoAnoFiltradas.map((c) => (React.createElement("div", { key: c.id, className: "bg-white border border-stone-200 rounded-2xl shadow-sm p-3 flex items-start gap-3" },
-                React.createElement("div", { className: "w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-white", style: { backgroundColor: corCategoria[c.categoria] || "#6b6b6b" } },
-                    React.createElement(Icon, { name: "clipboard", size: 15 })),
+                c.fotoBase64 ? (
+                    React.createElement("img", { src: c.fotoBase64, className: "w-9 h-9 rounded-full object-cover shrink-0" })
+                ) : (
+                    React.createElement("div", { className: "w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-white", style: { backgroundColor: corCategoria[c.categoria] || "#6b6b6b" } },
+                        React.createElement(Icon, { name: "clipboard", size: 15 }))),
                 React.createElement("div", { className: "flex-1 min-w-0" },
                     React.createElement("div", { className: "flex items-center justify-between gap-2" },
                         React.createElement("span", { className: "font-semibold text-stone-800 text-sm" }, c.produto),
