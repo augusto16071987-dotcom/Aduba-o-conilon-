@@ -4500,6 +4500,65 @@ function GraficoFinanceiro({ linhas }) {
             "Receita: R$ " + fmtBR(det.totalReceita, 2) + " \u00B7 Lucro: R$ " + fmtBR(det.lucro, 2) + " \u00B7 Margem: " + (det.margem != null ? fmtBR(det.margem, 1) + "%" : "\u2014")),
         React.createElement("p", { className: "text-[11px] text-stone-400 mt-2" }, "Toque num talh\u00E3o na lista (ou numa fatia) pra ver lucro e margem.")));
 }
+const MESES_ABREV_GRAFICO = ["Jan.", "Fev.", "Mar.", "Abr.", "Maio", "Jun.", "Jul.", "Ago.", "Set.", "Out.", "Nov.", "Dez."];
+function GraficoMensalFinanceiro({ linhas, talhaoId, ano }) {
+    const canvasRef = useRef(null);
+    const chartRef = useRef(null);
+    const fonte = talhaoId !== "todos" ? linhas.filter((l) => l.talhao.id === talhaoId) : linhas;
+    const receitasPorMes = Array(12).fill(0);
+    const despesasPorMes = Array(12).fill(0);
+    fonte.forEach((l) => {
+        (l.rc || []).forEach((r) => {
+            const mIdx = Number(String(r.data).slice(5, 7)) - 1;
+            if (mIdx >= 0 && mIdx < 12)
+                receitasPorMes[mIdx] += Number(r.valorTotal) || 0;
+        });
+        (l.ds || []).forEach((d) => {
+            const mIdx = Number(String(d.data).slice(5, 7)) - 1;
+            if (mIdx >= 0 && mIdx < 12)
+                despesasPorMes[mIdx] += Number(d.valorTotal) || 0;
+        });
+    });
+    const temDados = receitasPorMes.some((v) => v > 0) || despesasPorMes.some((v) => v > 0);
+    useEffect(() => {
+        if (!window.Chart || !canvasRef.current)
+            return;
+        if (chartRef.current)
+            chartRef.current.destroy();
+        chartRef.current = new window.Chart(canvasRef.current, {
+            type: "bar",
+            data: {
+                labels: MESES_ABREV_GRAFICO,
+                datasets: [
+                    { label: "Receitas", data: receitasPorMes, backgroundColor: "#2f7d3a", borderRadius: 3, maxBarThickness: 18 },
+                    { label: "Despesas", data: despesasPorMes, backgroundColor: "#c1443a", borderRadius: 3, maxBarThickness: 18 },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 }, color: "#57534e" } },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => " " + ctx.dataset.label + ": R$ " + fmtBR(ctx.raw, 2),
+                        },
+                    },
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: "#78716c", font: { size: 10 } } },
+                    y: { beginAtZero: true, grid: { color: "#e7e5e4" }, ticks: { color: "#78716c", font: { size: 10 }, callback: (v) => "R$ " + fmtBR(v, 0) } },
+                },
+            },
+        });
+        return () => { if (chartRef.current) chartRef.current.destroy(); };
+    }, [JSON.stringify(receitasPorMes), JSON.stringify(despesasPorMes)]);
+    if (!temDados)
+        return null;
+    return (React.createElement("div", { className: "bg-white rounded-xl border border-stone-200 p-3 mb-4" },
+        React.createElement("p", { className: "text-[11px] font-semibold tracking-wide text-stone-500 uppercase mb-2" }, "Receitas x Despesas por m\u00EAs \u2014 " + ano),
+        React.createElement("div", { style: { height: "220px" } }, React.createElement("canvas", { ref: canvasRef }))));
+}
 function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos, receitas, despesas, compras, onBack }) {
     const anoAtual = new Date().getFullYear();
     const anoDe = (item) => Number(String(item.data).slice(0, 4));
@@ -4650,6 +4709,7 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
                         CATEGORIAS_COMPRA.filter((c) => comprasPorCategoria[c] > 0).map((c) => (React.createElement("div", { key: c, className: "flex items-center justify-between py-1 text-sm" },
                             React.createElement("span", { className: "text-stone-600" }, c),
                             React.createElement("span", { className: "font-semibold text-[#a8442f]" }, "R$ ", fmtBR(comprasPorCategoria[c], 2))))))))),
+                React.createElement(GraficoMensalFinanceiro, { linhas: linhas, talhaoId: talhaoId, ano: ano }),
                 React.createElement(GraficoFinanceiro, { linhas: linhas }),
                 React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase px-1 mb-2" }, "Por talh\u00E3o"),
                 linhas.length === 0 && React.createElement("p", { className: "text-center text-stone-400 text-sm py-6" }, "Nenhum talh\u00E3o cadastrado ainda."),
