@@ -77,6 +77,13 @@ async function salvarStatusAssinatura(clienteId, preapproval) {
         campos.nome = { stringValue: nome };
         mask += "&updateMask.fieldPaths=nome";
     }
+    // A Mercado Pago já calcula quando é a próxima cobrança (inclui o fim
+    // do período grátis) — só precisamos guardar isso pra mostrar pro
+    // cliente dentro do app.
+    if (preapproval.next_payment_date) {
+        campos.proximaCobranca = { stringValue: preapproval.next_payment_date };
+        mask += "&updateMask.fieldPaths=proximaCobranca";
+    }
     const token = await obterTokenAdmin();
     await fetch(firestoreDocUrl(docId) + mask, {
         method: "PATCH",
