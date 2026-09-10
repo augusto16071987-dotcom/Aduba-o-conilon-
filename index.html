@@ -2660,12 +2660,25 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
     const [talhoesSelecionados, setTalhoesSelecionados] = useState(() => (talhoes || []).map((t) => t.id));
     const toggleTalhaoSelecionado = (id) => setTalhoesSelecionados((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
     const qtdSelecionados = talhoesSelecionados.length;
-    const valorPorTalhaoRateio = mostrarSeletorSetor && valorTotalCalculado != null && qtdSelecionados > 0 ? valorTotalCalculado / qtdSelecionados : null;
+    const [modoVarios, setModoVarios] = useState("ratear");
+    const ratear = modoVarios === "ratear";
+    const valorPorTalhaoRateio = mostrarSeletorSetor && valorTotalCalculado != null && qtdSelecionados > 0 ? (ratear ? valorTotalCalculado / qtdSelecionados : valorTotalCalculado) : null;
+    // Se aparece ou não na aba Estoque — adubo/defensivo/herbicida entram
+    // por padrão (são os que realmente fazem sentido acompanhar saldo);
+    // material/equipamento/outro ficam de fora por padrão, mas dá pra
+    // mudar (ex: um produto "Outro" que você também queira rastrear).
+    const [mostrarEstoque, setMostrarEstoque] = useState(initial ? initial.mostrarEstoque !== false : temAplicacao);
+    useEffect(() => {
+        if (!initial) setMostrarEstoque(temAplicacao);
+    }, [categoria]);
     return (React.createElement(Modal, { title: initial ? "Editar compra" : "Registrar compra", onClose: onClose },
         React.createElement(Field, { label: "Data da compra" },
             React.createElement("input", { type: "date", className: inputCls, value: data, onChange: (e) => setData(e.target.value) })),
         React.createElement(Field, { label: "Categoria" },
             React.createElement(ChoiceRow, { options: CATEGORIAS_COMPRA.map((c) => [c, c]), value: categoria, onChange: setCategoria, cols: 3 })),
+        React.createElement("label", { className: "flex items-center gap-2 mb-3 -mt-1 text-sm text-stone-700 bg-[#f2ece0] rounded-lg px-3 py-2" },
+            React.createElement("input", { type: "checkbox", checked: mostrarEstoque, onChange: (e) => setMostrarEstoque(e.target.checked), className: "w-4 h-4 accent-[#33422e]" }),
+            "Mostrar esse produto na aba Estoque"),
         React.createElement(Field, { label: "Produto" },
             React.createElement(ProdutoInput, { tipo: tipoBusca, value: produto, onChange: setProduto, onFormulacaoFound: setFormulacao, onComposicaoFound: aplicarComposicao, placeholder: "Ex: Ureia, Oxicloreto de cobre, Calc\u00E1rio, Mangueira..." })),
         mostrarFormulacao && (React.createElement(Field, { label: "Formula\u00E7\u00E3o / ingrediente ativo (refer\u00EAncia)" },
@@ -2702,14 +2715,16 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
                 React.createElement("input", { type: "number", inputMode: "decimal", placeholder: "0", className: "w-full rounded-lg border border-stone-300 bg-white px-2 py-2 text-sm", value: nutrientesState[nu.key][0], onChange: (e) => nutrientesState[nu.key][1](e.target.value) }))))))),
         mostrarSeletorSetor && (React.createElement("div", { className: "bg-[#f2ece0] rounded-lg p-3 mb-3" },
             React.createElement("p", { className: "text-xs font-semibold text-stone-600 mb-1" }, "Em quais setores esse produto vai ser usado?"),
-            React.createElement("p", { className: "text-xs text-stone-500 mb-2" }, "Como essa categoria n\u00E3o passa por um registro de aplica\u00E7\u00E3o, o valor marcado aqui j\u00E1 entra direto como despesa nesses talh\u00F5es, dividido entre eles. Desmarque todos se n\u00E3o quiser contar esse gasto ainda."),
+            React.createElement("p", { className: "text-xs text-stone-500 mb-2" }, "Como essa categoria n\u00E3o passa por um registro de aplica\u00E7\u00E3o, o valor marcado aqui j\u00E1 entra direto como despesa nesses talh\u00F5es. Desmarque todos se n\u00E3o quiser contar esse gasto ainda."),
             talhoes.map((t) => (React.createElement("label", { key: t.id, className: "flex items-center justify-between gap-2 py-1.5 text-sm text-stone-700" },
                 React.createElement("span", { className: "flex items-center gap-2" },
                     React.createElement("input", { type: "checkbox", checked: talhoesSelecionados.includes(t.id), onChange: () => toggleTalhaoSelecionado(t.id), className: "w-4 h-4 accent-[#33422e]" }),
                     t.nome),
                 React.createElement("span", { className: "text-xs text-stone-400" }, fmtBR(Number(t.area) || 0, 2), " ha")))),
+            qtdSelecionados > 1 && (React.createElement("div", { className: "mt-2" },
+                React.createElement(ChoiceRow, { options: [["ratear", "Dividir o valor entre eles"], ["replicar", "Mesmo valor em cada"]], value: modoVarios, onChange: setModoVarios }))),
             qtdSelecionados > 1 && valorPorTalhaoRateio != null && (React.createElement("p", { className: "text-xs text-[#8a6d3b] mt-2" },
-                `Dividido igualmente: R$ ${fmtBR(valorPorTalhaoRateio, 2)} por talh\u00E3o.`)),
+                ratear ? `Dividido igualmente: R$ ${fmtBR(valorPorTalhaoRateio, 2)} por talh\u00E3o.` : `R$ ${fmtBR(valorPorTalhaoRateio, 2)} lan\u00E7ado em cada talh\u00E3o (total: R$ ${fmtBR(valorPorTalhaoRateio * qtdSelecionados, 2)}).`)),
             qtdSelecionados === 0 && (React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "Nenhuma despesa ser\u00E1 lan\u00E7ada agora \u2014 s\u00F3 vai pro estoque.")))),
         React.createElement(Field, { label: "Observa\u00E7\u00F5es" },
             React.createElement("textarea", { className: inputCls, rows: 2, placeholder: "Alguma anota\u00E7\u00E3o extra (opcional)", value: obs, onChange: (e) => setObs(e.target.value) })),
@@ -2724,15 +2739,17 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
                 const compraObj = {
                     id: initial ? initial.id : uid(), data, categoria, produto: produto.trim(), formulacao: formulacao.trim(),
                     quantidade: Number(quantidade), unidade, pesoSaco: (unidade === "sacos" || unidade === "galoes") ? Number(pesoSaco) : null, valorTotal: total, obs: obs.trim(),
+                    mostrarEstoque,
                     ...nutrientesSalvos,
                 };
                 if (mostrarSeletorSetor && qtdSelecionados > 0) {
-                    const valorPorTalhao = Number((total / qtdSelecionados).toFixed(2));
+                    const valorPorTalhao = ratear ? Number((total / qtdSelecionados).toFixed(2)) : total;
                     const despesaRegistros = talhoes.filter((t) => talhoesSelecionados.includes(t.id)).map((t) => ({
                         talhaoId: t.id,
                         dados: {
                             id: uid(), data, categoria, descricao: `Compra: ${produto.trim()}`, valorTotal: valorPorTalhao,
-                            rateioTotal: qtdSelecionados > 1 ? total : null, rateioQtdTalhoes: qtdSelecionados > 1 ? qtdSelecionados : null, obs: obs.trim(),
+                            rateioTotal: ratear && qtdSelecionados > 1 ? total : null, rateioQtdTalhoes: ratear && qtdSelecionados > 1 ? qtdSelecionados : null,
+                            replicadoQtdTalhoes: !ratear && qtdSelecionados > 1 ? qtdSelecionados : null, obs: obs.trim(),
                         },
                     }));
                     onSave({ ...compraObj, despesaRegistros });
@@ -2780,9 +2797,13 @@ function calcularEstoque(compras, adubacoesPorTalhao, defensivosPorTalhao, despe
         }
         return porProduto[k];
     };
-    // entradas: compras
+    // entradas: compras (pula as marcadas pra não aparecer no estoque —
+    // por padrão, isso é Material/Equipamento/Outro, que raramente fazem
+    // sentido como "saldo restante")
     (compras || []).forEach((c) => {
         if (!c.produto) return;
+        const mostrar = c.mostrarEstoque != null ? c.mostrarEstoque : (c.categoria === "Adubo" || c.categoria === "Defensivo" || c.categoria === "Herbicida");
+        if (!mostrar) return;
         const item = garantir(c.produto, c.categoria);
         const base = paraUnidadeBase(c.quantidade, c.unidade, c.pesoSaco);
         item.comprado += base || 0;
@@ -4369,56 +4390,43 @@ const rotulosValorPlugin = {
 function GraficoFinanceiro({ linhas }) {
     const canvasRef = useRef(null);
     const chartRef = useRef(null);
+    const [selecionado, setSelecionado] = useState(null);
     const ordenadas = [...linhas].sort((a, b) => b.totalGasto - a.totalGasto);
+    const somaGastos = ordenadas.reduce((s, l) => s + l.totalGasto, 0);
+    const PALETA = ["#a8442f", "#c98a2c", "#4c6146", "#33628a", "#8a6d3b", "#6b4d8a", "#a65f8a", "#4d8a7a"];
     useEffect(() => {
         if (!window.Chart || !canvasRef.current)
             return;
         if (chartRef.current)
             chartRef.current.destroy();
         const labels = ordenadas.map((l) => l.talhao.nome);
-        const coresLucro = ordenadas.map((l) => (l.lucro >= 0 ? "#4c6146" : "#a8442f"));
+        const cores = ordenadas.map((_, i) => PALETA[i % PALETA.length]);
         chartRef.current = new window.Chart(canvasRef.current, {
-            type: "bar",
+            type: "doughnut",
             data: {
                 labels,
-                datasets: [
-                    { label: "Gasto", data: ordenadas.map((l) => l.totalGasto), backgroundColor: "#a8442f", borderRadius: 4, barPercentage: 0.7, categoryPercentage: 0.7 },
-                    { label: "Lucro", data: ordenadas.map((l) => l.lucro), backgroundColor: coresLucro, borderRadius: 4, barPercentage: 0.7, categoryPercentage: 0.7 },
-                ],
+                datasets: [{ data: ordenadas.map((l) => l.totalGasto), backgroundColor: cores, borderColor: "#fbf8f2", borderWidth: 2 }],
             },
-            plugins: [rotulosValorPlugin],
             options: {
-                indexAxis: "y",
                 responsive: true,
                 maintainAspectRatio: false,
-                layout: { padding: { right: 54, left: 2 } },
+                cutout: "62%",
                 plugins: {
                     legend: { display: false },
                     tooltip: {
                         displayColors: false,
                         callbacks: {
-                            title: (items) => items[0].label,
                             label: (ctx) => {
                                 const l = ordenadas[ctx.dataIndex];
-                                return [
-                                    "Gasto: R$ " + fmtBR(l.totalGasto, 2),
-                                    "Receita: R$ " + fmtBR(l.totalReceita, 2),
-                                    "Lucro: R$ " + fmtBR(l.lucro, 2),
-                                    "Margem: " + (l.margem != null ? fmtBR(l.margem, 1) + "%" : "—"),
-                                ];
+                                const pct = somaGastos > 0 ? (l.totalGasto / somaGastos * 100) : 0;
+                                return " R$ " + fmtBR(l.totalGasto, 2) + " (" + fmtBR(pct, 1) + "%)";
                             },
                         },
                     },
                 },
-                scales: {
-                    x: {
-                        ticks: { callback: (v) => "R$ " + fmtBR(v, 0), font: { size: 10 } },
-                        grid: { color: "#eee6d6" },
-                    },
-                    y: {
-                        ticks: { font: { size: 12 }, color: "#4b4237" },
-                        grid: { display: false },
-                    },
+                onClick: (evt, elementos) => {
+                    if (elementos.length > 0)
+                        setSelecionado(elementos[0].index);
                 },
             },
         });
@@ -4427,16 +4435,25 @@ function GraficoFinanceiro({ linhas }) {
     }, [linhas]);
     if (linhas.length === 0)
         return null;
-    const altura = Math.max(160, ordenadas.length * 56 + 30);
+    const det = selecionado != null ? ordenadas[selecionado] : null;
     return (React.createElement("div", { className: "bg-white rounded-xl border border-stone-200 p-3 mb-4" },
-        React.createElement("div", { className: "flex items-center justify-between mb-2" },
-            React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase" }, "Gasto e lucro por talh\u00E3o"),
-            React.createElement("div", { className: "flex items-center gap-3 text-[10px] text-stone-400" },
-                React.createElement("span", { className: "flex items-center gap-1" }, React.createElement("span", { className: "w-2 h-2 rounded-full inline-block", style: { backgroundColor: "#a8442f" } }), "Gasto"),
-                React.createElement("span", { className: "flex items-center gap-1" }, React.createElement("span", { className: "w-2 h-2 rounded-full inline-block", style: { backgroundColor: "#4c6146" } }), "Lucro"))),
-        React.createElement("div", { style: { height: altura + "px" } },
+        React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase mb-3" }, "Gasto por talh\u00E3o"),
+        React.createElement("div", { style: { height: "220px" } },
             React.createElement("canvas", { ref: canvasRef })),
-        React.createElement("p", { className: "text-[11px] text-stone-400 mt-2" }, "Ordenado do talh\u00E3o que mais gastou pro que menos gastou. Toque numa barra pra ver receita e margem.")));
+        React.createElement("div", { className: "mt-3 space-y-1" },
+            ordenadas.map((l, i) => {
+                const pct = somaGastos > 0 ? (l.totalGasto / somaGastos * 100) : 0;
+                const ativo = selecionado === i;
+                return React.createElement("button", { key: l.talhao.id, onClick: () => setSelecionado(ativo ? null : i), className: "w-full flex items-center gap-2 text-left py-1.5 rounded-lg px-1.5 " + (ativo ? "bg-[#f2ece0]" : "") },
+                    React.createElement("span", { className: "w-2.5 h-2.5 rounded-full shrink-0", style: { backgroundColor: PALETA[i % PALETA.length] } }),
+                    React.createElement("span", { className: "flex-1 text-xs text-stone-700 truncate" }, l.talhao.nome),
+                    React.createElement("span", { className: "text-xs font-semibold text-stone-800" }, "R$ " + fmtBR(l.totalGasto, 0)),
+                    React.createElement("span", { className: "text-[10px] text-stone-400 w-9 text-right" }, fmtBR(pct, 0) + "%"));
+            })),
+        det && React.createElement("div", { className: "mt-1 bg-[#f2ece0] rounded-lg p-2.5 text-xs text-stone-600" },
+            React.createElement("p", { className: "font-semibold text-stone-800 mb-1" }, det.talhao.nome),
+            "Receita: R$ " + fmtBR(det.totalReceita, 2) + " \u00B7 Lucro: R$ " + fmtBR(det.lucro, 2) + " \u00B7 Margem: " + (det.margem != null ? fmtBR(det.margem, 1) + "%" : "\u2014")),
+        React.createElement("p", { className: "text-[11px] text-stone-400 mt-2" }, "Toque num talh\u00E3o na lista (ou na fatia) pra ver receita e margem.")));
 }
 function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos, receitas, despesas, compras, onBack }) {
     const anoAtual = new Date().getFullYear();
