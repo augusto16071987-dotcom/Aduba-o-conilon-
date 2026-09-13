@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-09-13-v111-qtd-calendario";
+const APP_VERSION = "build-2026-09-13-v112-qtd-total-setor";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
    ÍCONES — SVGs simples embutidos (sem dependência externa)
@@ -4105,19 +4105,46 @@ function CalendarioScreen({ talhoes, adubacoes, defensivos, agendamentos, compra
     const nomeTalhao = (id) => { const t = talhoes.find((x) => x.id === id); return t ? t.nome : "Talhão removido"; };
     const labelForma = (f) => (FORMAS_APLICACAO.find(([k]) => k === f) || [null, f])[1];
     const fmtNum = (n) => (Number(n) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
-    // Texto da quantidade/dose pra mostrar no card do evento (ex: "5 kg", "2 kg/ha",
-    // "40 g/planta") — cobre agendamento, adubação já aplicada e defensivo.
+    // Converte dose (kg/ha, L/ha, g/planta, mL/planta) na quantidade TOTAL
+    // pra aquele talhão específico, usando a área ou o número de plantas
+    // cadastrado — pra mostrar sempre um número pronto de "quanto aplicar
+    // nesse setor", em vez da taxa crua.
+    const converterParaTotalNoTalhao = (valor, unidade, talhaoId) => {
+        const t = talhoes.find((x) => x.id === talhaoId);
+        if (!t)
+            return null;
+        if (unidade === "kg/ha" || unidade === "L/ha") {
+            const total = Number(valor) * (Number(t.area) || 0);
+            return { total, unidadeGrande: unidade === "L/ha" ? "L" : "kg" };
+        }
+        if (unidade === "g/planta" || unidade === "mL/planta") {
+            if (!t.numPlantas)
+                return null;
+            const total = (Number(valor) * Number(t.numPlantas)) / 1000;
+            return { total, unidadeGrande: unidade === "mL/planta" ? "L" : "kg" };
+        }
+        return null;
+    };
+    // Texto da quantidade pra mostrar no card do evento — já convertido pro
+    // total daquele setor (ex: "25,68 kg"), cobre agendamento, adubação já
+    // aplicada e defensivo.
     const formatQtdEvento = (ev) => {
         if (ev.tipo === "defensivo") {
             const d = ev.item;
             if (d.dose == null || d.dose === "" || !d.unidade)
                 return null;
+            const conv = converterParaTotalNoTalhao(d.dose, d.unidade, ev.talhaoId);
+            if (conv)
+                return fmtNum(conv.total) + " " + conv.unidadeGrande;
             return fmtNum(d.dose) + " " + d.unidade;
         }
         if (ev.tipo === "agendamento" || ev.tipo === "adubacao") {
             const a = ev.item;
             if (a.quantidade == null || a.quantidade === "" || !a.unidade || a.unidade === "min")
                 return null;
+            const conv = converterParaTotalNoTalhao(a.quantidade, a.unidade, ev.talhaoId);
+            if (conv)
+                return fmtNum(conv.total) + " " + conv.unidadeGrande;
             return fmtNum(a.quantidade) + " " + a.unidade;
         }
         return null;
