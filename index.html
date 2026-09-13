@@ -476,15 +476,19 @@ function calcularCalagem(ctcT, vAtual, vDesejado, prnt, areaHa) {
    Usa o peso do saco de referência (vindo da compra do produto) quando
    disponível — antes assumia sempre 50kg, o que dava conta errada pra
    sacos de outro tamanho (25kg, por exemplo). */
-function quantidadeEmKg(a, areaHa) {
+function quantidadeEmKg(a, areaHa, numPlantas) {
     const q = Number(a.quantidade) || 0;
     if (a.unidade === "sacos")
         return q * (Number(a.pesoSacoRef) || 50);
     if (a.unidade === "kg/ha" || a.unidade === "L/ha")
         return q * areaHa;
+    if (a.unidade === "g/planta" || a.unidade === "mL/planta") {
+        if (!numPlantas) return null; // precisa saber quantas plantas tem o talhão pra converter
+        return (q * numPlantas) / 1000;
+    }
     if (a.unidade === "kg" || a.unidade === "L")
         return q;
-    return null; // outras unidades (ex: mL por planta, dose de calda) não entram nesse cálculo
+    return null; // outras unidades (ex: dose de calda) não entram nesse cálculo
 }
 /* A partir do histórico de adubações + composição de cada produto
    (campos de % de N, P2O5, K2O, S, Zn, Cu, Mn, B), soma quanto de
@@ -492,11 +496,11 @@ function quantidadeEmKg(a, areaHa) {
    que só tinham o campo "formulação" (NN-PP-KK) continuam sendo
    lidos por compatibilidade, só que sem os micronutrientes. */
 const RE_FORMULACAO_NPK = /^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/;
-function calcularAplicado(adubacoes, areaHa) {
+function calcularAplicado(adubacoes, areaHa, numPlantas) {
     const total = { n: 0, p2o5: 0, k2o: 0, s: 0, zn: 0, cu: 0, mn: 0, b: 0, mg: 0 };
     let algumaContabilizada = false;
     adubacoes.forEach((a) => {
-        const kg = quantidadeEmKg(a, areaHa);
+        const kg = quantidadeEmKg(a, areaHa, numPlantas);
         if (kg == null)
             return;
         const temCampos = NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).some((nu) => a[nu.key] != null && a[nu.key] !== "");
@@ -524,9 +528,9 @@ function calcularAplicado(adubacoes, areaHa) {
 /* Mesma lógica de calcularAplicado, mas rodando sobre os agendamentos ainda
    não concluídos que têm quantidade prevista informada — dá quanto "está
    a caminho" de ser aplicado, pra mostrar como sombra na barra de meta. */
-function calcularPrevisto(agendamentosDoTalhao, areaHa) {
+function calcularPrevisto(agendamentosDoTalhao, areaHa, numPlantas) {
     const pendentesComQtd = (agendamentosDoTalhao || []).filter((a) => !a.concluido && a.quantidade);
-    return calcularAplicado(pendentesComQtd, areaHa);
+    return calcularAplicado(pendentesComQtd, areaHa, numPlantas);
 }
 /* ---------------------------------------------------------------
    BASE LOCAL DE PRODUTOS — adubos e defensivos mais comuns no
@@ -2849,7 +2853,7 @@ function calcularEstoque(compras, adubacoesPorTalhao, defensivosPorTalhao, despe
         const area = Number(t.area) || 0;
         ((adubacoesPorTalhao || {})[t.id] || []).forEach((a) => {
             if (!a.produto || a.produto === "Irriga\u00E7\u00E3o") return;
-            const kg = quantidadeEmKg(a, area);
+            const kg = quantidadeEmKg(a, area, Number(t.numPlantas) || 0);
             if (kg == null) return;
             garantir(a.produto).aplicado += kg;
         });
@@ -2872,7 +2876,7 @@ function calcularEstoque(compras, adubacoesPorTalhao, defensivosPorTalhao, despe
         // informada — "separa" essa quantidade do saldo, como uma sombra.
         ((agendamentosPorTalhao || {})[t.id] || []).forEach((a) => {
             if (a.concluido || !a.produto || !a.quantidade) return;
-            const kg = quantidadeEmKg(a, area);
+            const kg = quantidadeEmKg(a, area, Number(t.numPlantas) || 0);
             if (kg == null) return;
             garantir(a.produto).reservado += kg;
         });
@@ -3077,8 +3081,8 @@ function CartaoRecomendacao({ talhao, talhoes, analise, adubacoes, agendamentos,
             React.createElement("span", null,
                 "A tabela ", r.tabela.nome, " precisa de um laudo pelo m\u00E9todo ", nomeExtrator(r.extratorEsperado), ", mas a \u00FAltima an\u00E1lise cadastrada foi marcada como ", nomeExtrator(r.extratorInformado), ". Edite a an\u00E1lise de solo e ajuste o campo \"M\u00E9todo do laborat\u00F3rio\", ou cadastre uma nova an\u00E1lise com o m\u00E9todo certo.")));
     }
-    const aplicado = calcularAplicado(adubacoes, talhao.area);
-    const previsto = calcularPrevisto(agendamentos, talhao.area);
+    const aplicado = calcularAplicado(adubacoes, talhao.area, Number(talhao.numPlantas) || 0);
+    const previsto = calcularPrevisto(agendamentos, talhao.area, Number(talhao.numPlantas) || 0);
     const linha = (label, unidade, porHa, total) => porHa == null ? null : (React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100 last:border-0" },
         React.createElement("span", { className: "text-stone-600 text-sm" }, label),
         React.createElement("span", { className: "text-right" },
@@ -3913,14 +3917,48 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
                 React.createElement(Field, { label: "Produto (do estoque)" },
                     React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: forma === "defensivo" ? ["Defensivo", "Herbicida"] : "todos", value: it.produto, onChange: (v) => atualizarItem(i, "produto", v), onProdutoSelecionado: (c) => escolherProdutoItem(i, c) })),
                 React.createElement("div", { className: "grid grid-cols-2 gap-3" },
-                    React.createElement(Field, { label: "Quantidade prevista (opcional)" },
+                    React.createElement(Field, { label: it.unidade === "g/planta" || it.unidade === "mL/planta" ? "Dose (por planta)" : it.unidade === "kg/ha" || it.unidade === "L/ha" ? "Dose (por hectare)" : "Quantidade prevista (opcional)" },
                         React.createElement(NumInput, { placeholder: "Ex: 5", value: it.quantidade, onChange: (e) => atualizarItem(i, "quantidade", e.target.value) })),
                     React.createElement(Field, { label: "Unidade" },
                         React.createElement("select", { className: inputCls, value: it.unidade, onChange: (e) => atualizarItem(i, "unidade", e.target.value) },
-                            React.createElement("option", { value: "kg" }, "kg"),
-                            React.createElement("option", { value: "kg/ha" }, "kg/ha"),
+                            React.createElement("option", { value: "kg" }, "kg (total)"),
+                            React.createElement("option", { value: "L" }, "litros (total)"),
                             React.createElement("option", { value: "sacos" }, "sacos"),
-                            React.createElement("option", { value: "L" }, "litros"))))))),
+                            React.createElement("option", { value: "kg/ha" }, "kg/ha (dose)"),
+                            React.createElement("option", { value: "L/ha" }, "L/ha (dose)"),
+                            React.createElement("option", { value: "g/planta" }, "g/planta (dose)"),
+                            React.createElement("option", { value: "mL/planta" }, "mL/planta (dose)")))),
+                (() => {
+                    const ehDose = ["kg/ha", "L/ha", "g/planta", "mL/planta"].includes(it.unidade);
+                    if (!ehDose || !it.quantidade)
+                        return null;
+                    const unidadeGrande = (it.unidade === "L/ha" || it.unidade === "mL/planta") ? "L" : "kg";
+                    const calcularTotal = (t) => {
+                        if (it.unidade === "kg/ha" || it.unidade === "L/ha")
+                            return (Number(it.quantidade) || 0) * (Number(t.area) || 0);
+                        if (!t.numPlantas)
+                            return null;
+                        return ((Number(it.quantidade) || 0) * Number(t.numPlantas)) / 1000;
+                    };
+                    if (!todosOsTalhoes) {
+                        const talhaoSel = talhoes.find((t) => t.id === talhaoId);
+                        if (!talhaoSel)
+                            return null;
+                        const total = calcularTotal(talhaoSel);
+                        if (total == null)
+                            return React.createElement("p", { className: "text-[11px] text-amber-600 -mt-1 mb-2" }, "Cadastre o n\u00FAmero de plantas do talh\u00E3o pra calcular a quantidade por planta.");
+                        return React.createElement("p", { className: "text-xs text-[#33422e] bg-[#eef3e8] rounded-lg px-3 py-2 -mt-1 mb-2" },
+                            "Quantidade nesse setor: ", React.createElement("b", null, fmtBR(total, 2), " ", unidadeGrande));
+                    }
+                    return React.createElement("div", { className: "bg-[#eef3e8] rounded-lg px-3 py-2 -mt-1 mb-2 space-y-1" },
+                        React.createElement("p", { className: "text-[11px] font-semibold text-stone-500 uppercase" }, "Quantidade por setor"),
+                        talhoes.map((t) => {
+                            const total = calcularTotal(t);
+                            return React.createElement("p", { key: t.id, className: "text-xs text-[#33422e] flex items-center justify-between gap-2" },
+                                React.createElement("span", { className: "truncate" }, t.nome),
+                                React.createElement("b", { className: "shrink-0" }, total != null ? fmtBR(total, 2) + " " + unidadeGrande : "sem plantas cadastradas"));
+                        }));
+                })()))),
             !initial && React.createElement("button", { type: "button", onClick: adicionarItem, className: "w-full flex items-center justify-center gap-1 border border-dashed border-[#c9a06c] text-[#8a6d3b] rounded-lg py-2 text-xs font-semibold mb-2" },
                 React.createElement(Icon, { name: "plus", size: 14 }),
                 " Adicionar outro produto na mesma calda"),
