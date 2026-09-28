@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-09-13-v112-qtd-total-setor";
+const APP_VERSION = "build-2026-09-28-v113-cidade-ajuda";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
    ÍCONES — SVGs simples embutidos (sem dependência externa)
@@ -4943,12 +4943,20 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
             ["Baixar e compartilhar", "O resultado final tem os bot\u00F5es Baixar PDF e Compartilhar \u2014 \u00FAteis pra guardar ou mandar direto pro WhatsApp de quem for aplicar (um funcion\u00E1rio, por exemplo), sem precisar ele entrar no app."],
             ["Importante", "A calculadora s\u00F3 calcula \u2014 n\u00E3o registra nada no hist\u00F3rico nem desconta do estoque. Depois de aplicar de verdade no campo, v\u00E1 na aba Aduba\u00E7\u00E3o, Pragas ou Manejo (herbicida) do talh\u00E3o e registre l\u00E1, pra entrar no custo e no estoque."],
         ] },
+        { id: "previsao", titulo: "\ud83c\udf24\ufe0f Previs\u00E3o do tempo", itens: [
+            ["Onde fica", "Na tela inicial, abaixo da cota\u00E7\u00E3o do caf\u00E9. Mostra a temperatura de agora e a previs\u00E3o dos pr\u00F3ximos dias (m\u00E1xima, m\u00EDnima e chance de chuva). Toque num dia pra ver o detalhe, incluindo o volume de chuva previsto em mm. Os dados v\u00EAm do Open-Meteo, um servi\u00E7o gratuito."],
+            ["Nome da cidade", "No canto do cart\u00E3o aparece o nome da cidade onde voc\u00EA est\u00E1 (ex: \"Colatina - ES\"), descoberto sozinho pela localiza\u00E7\u00E3o do aparelho. Se o celular n\u00E3o conseguir identificar a cidade, aparece \"Minha localiza\u00E7\u00E3o\" no lugar \u2014 a previs\u00E3o continua certa, s\u00F3 muda o r\u00F3tulo."],
+            ["Trocar o local", "Toque no nome da cidade pra mudar: use \"Usar minha localiza\u00E7\u00E3o atual\" ou digite o nome de outra cidade e escolha na lista. \u00C9 \u00FAtil se a lavoura fica longe de onde voc\u00EA costuma estar, porque a previs\u00E3o vale pro local escolhido."],
+            ["Aviso de chuva", "Quando a chance de chuva de hoje chega a 60% ou mais, aparece um lembrete azul avisando pra pensar duas vezes antes de pulverizar defensivo ou herbicida."],
+        ] },
         { id: "calendario", titulo: "Calend\u00E1rio, agendamentos e avisos", itens: [
             ["\u00CDcones", "Saco de adubo = aduba\u00E7\u00E3o, gota = irriga\u00E7\u00E3o, bichinho = defensivo. A cor da bolinha diz o estado: azul (agendado, data no futuro), vermelho (atrasado \u2014 a data j\u00E1 passou e ningu\u00E9m marcou como conclu\u00EDdo), verde ou laranja (j\u00E1 feito)."],
             ["Agendar", "Abra o {{Calend\u00E1rio|calendario}}, toque em \"Agendar aplica\u00E7\u00E3o\" e escolha a data, o talh\u00E3o (ou todos de uma vez, se for a mesma aplica\u00E7\u00E3o em v\u00E1rios), a forma (via solo, foliar, fertirriga\u00E7\u00E3o, irriga\u00E7\u00E3o ou outro) e o produto do estoque. \u00C9 s\u00F3 um lembrete pra n\u00E3o esquecer \u2014 n\u00E3o lan\u00E7a custo nem desconta estoque nesse momento."],
             ["Agendar v\u00E1rias datas de uma vez", "No formul\u00E1rio de agendamento, toque em \"+ Adicionar outra data\" pra empilhar v\u00E1rias datas de uma s\u00F3 vez \u2014 \u00FAtil pra fertirriga\u00E7\u00E3o semanal, por exemplo. O app cria um agendamento separado pra cada combina\u00E7\u00E3o de data, talh\u00E3o e produto, e o bot\u00E3o final mostra quantos vai criar."],
             ["V\u00E1rios produtos na mesma calda", "Assim como no registro de aplica\u00E7\u00E3o, agora d\u00E1 pra tocar em \"Adicionar outro produto na mesma calda\" j\u00E1 na hora de agendar \u2014 cada produto pode ter sua pr\u00F3pria quantidade prevista."],
             ["Quantidade prevista (opcional)", "Ao agendar uma aduba\u00E7\u00E3o, foliar, fertirriga\u00E7\u00E3o ou defensivo, um campo opcional de quantidade permite que esse agendamento entre na previs\u00E3o (sombra) da barra de Meta x aplicado do talh\u00E3o, e tamb\u00E9m reserve a quantidade correspondente no {{Financeiro|financeiro}} (Estoque) \u2014 mostrando se vai faltar produto antes mesmo do dia da aplica\u00E7\u00E3o chegar. Se deixar em branco, o agendamento continua funcionando normal, s\u00F3 n\u00E3o entra nessas duas previs\u00F5es."],
+            ["Dose por hectare ou por planta", "No campo Unidade do agendamento, al\u00E9m de kg, litros e sacos (quantidade total), tem as op\u00E7\u00F5es de dose: kg/ha, L/ha, g/planta e mL/planta. Ao escolher uma delas e digitar a dose, o app calcula na hora a quantidade total pro setor (usando a \u00E1rea ou o n\u00FAmero de plantas cadastrado no talh\u00E3o) e mostra logo abaixo, ex: \"Quantidade nesse setor: 25,7 kg\". Se marcar \"Agendar nos talh\u00F5es de uma vez\", aparece a lista com a quantidade de cada setor, cada um calculado pelo seu pr\u00F3prio tamanho \u2014 assim voc\u00EA j\u00E1 sabe quanto separar de adubo pra cada um. Se um talh\u00E3o n\u00E3o tiver o n\u00FAmero de plantas cadastrado, o app avisa em vez de calcular errado (edite o talh\u00E3o pra informar)."],
+            ["Quantidade no card do dia", "Ao tocar num dia do {{Calend\u00E1rio|calendario}}, cada aplica\u00E7\u00E3o mostra uma etiqueta verde ao lado do nome do produto com a quantidade total pra aquele setor (kg ou L) \u2014 j\u00E1 convertida quando o agendamento foi feito em dose por hectare ou por planta. Aparece nos agendamentos, nas aduba\u00E7\u00F5es j\u00E1 registradas e nos defensivos, do lado do bot\u00E3o Conclu\u00EDdo."],
             ["Concluir", "Ao tocar num dia com agendamento e marcar como conclu\u00EDdo, o app abre o registro de verdade j\u00E1 preenchido com data e produto \u2014 voc\u00EA s\u00F3 confirma a quantidade (e, se for calc\u00E1rio ou adubo em v\u00E1rios talh\u00F5es, em quais setores entrou). Ao salvar, a\u00ED sim entra no hist\u00F3rico, no custo e desconta do estoque, e o agendamento some da lista de pendentes."],
             ["\u00C9pocas do ano", "No fim da tela tem um quadro de refer\u00EAncia (tipo um calend\u00E1rio agr\u00EDcola) mostrando em quais meses cada atividade costuma ser recomendada pro caf\u00E9 conilon \u2014 an\u00E1lise de solo, aduba\u00E7\u00E3o, poda, colheita, controle de pragas espec\u00EDficas, etc. \u00C9 s\u00F3 uma refer\u00EAncia geral, vale ajustar pro clima da sua regi\u00E3o."],
             ["Aviso de atraso", "Na tela inicial, um card vermelho aparece automaticamente sempre que tiver algum agendamento atrasado (data j\u00E1 passou e n\u00E3o foi marcado como conclu\u00EDdo), com o nome do talh\u00E3o e o que falta fazer. Toque no card pra ir direto ao Calend\u00E1rio e resolver."],
@@ -4968,7 +4976,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
         { id: "relatorio", titulo: "Relat\u00F3rio financeiro", itens: [
             ["Vis\u00E3o geral ou por talh\u00E3o", "Seletor no topo alterna entre o total somado de toda a lavoura e o detalhe de um talh\u00E3o espec\u00EDfico, com data e valor de cada despesa/receita individualmente."],
             ["Custo por saca", "Mostra quanto est\u00E1 custando produzir cada saca de caf\u00E9, com base na produtividade esperada que voc\u00EA cadastrou no talh\u00E3o \u2014 \u00FAtil pra comparar a efici\u00EAncia de um setor em rela\u00E7\u00E3o a outro."],
-            ["Gr\u00E1fico", "Barras de Gasto e Lucro lado a lado por talh\u00E3o, ordenadas do que mais gastou pro que menos gastou, com o valor exato escrito ao lado de cada barra \u2014 assim d\u00E1 pra comparar mesmo quando um talh\u00E3o tem valores bem maiores que os outros."],
+            ["Gr\u00E1fico por setor", "Barras lado a lado por talh\u00E3o (setor): Receitas em verde e Despesas em vermelho, ordenadas do setor que mais gastou pro que menos gastou. Toque numa barra pra ver o valor exato em reais. S\u00F3 aparece quando j\u00E1 existe algum lan\u00E7amento no ano selecionado."],
             ["Gasto por categoria", "Separa por Aduba\u00E7\u00E3o, Defensivo, Herbicida (categoria pr\u00F3pria, n\u00E3o entra mais junto com Defensivo), M\u00E3o de obra, Combust\u00EDvel, etc."],
             ["Herbicida aplicado", "No detalhe de cada talh\u00E3o, um card mostra o total de bombadas, litros de calda pulverizada e quantidade de produto usados no ano \u2014 separado por produto, se foi mistura."],
             ["PDF e compartilhar", "Gera relat\u00F3rio completo pra salvar ou mandar no WhatsApp, tanto da vis\u00E3o geral quanto de um talh\u00E3o s\u00F3."],
@@ -4998,7 +5006,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
             ["PDF do laudo veio errado ou em branco", "Confira sempre os campos antes de salvar. Cada laborat\u00F3rio formata o laudo de um jeito diferente, e a leitura autom\u00E1tica pode errar. Fotos e PDFs escaneados sem texto n\u00E3o funcionam (o app avisa que n\u00E3o achou nada) \u2014 nesse caso, \u00E9 s\u00F3 preencher na m\u00E3o mesmo."],
             ["Recomenda\u00E7\u00E3o deu 0,0 kg/ha", "N\u00E3o \u00E9 erro: significa que o nutriente j\u00E1 est\u00E1 classificado como \"Alto\" no solo, segundo a \u00FAltima an\u00E1lise, ent\u00E3o o certo \u00E9 n\u00E3o aplicar mais (evita desperd\u00EDcio). A barra fica vermelha e cheia nesse caso, pra n\u00E3o parecer que \u00E9 \"0% de progresso\"."],
             ["N\u00E3o consigo calcular o custo do herbicida ou defensivo", "S\u00F3 calcula quando j\u00E1 existe uma compra registrada daquele mesmo produto, com a mesma unidade (mL/L ou g/kg confere com kg/L da compra). Cadastre a compra em {{Financeiro|financeiro}} primeiro, ou ajuste a unidade escolhida na aplica\u00E7\u00E3o."],
-            ["Um produto que apliquei n\u00E3o descontou do estoque", "Confira se a aplica\u00E7\u00E3o foi registrada de verdade (n\u00E3o s\u00F3 agendada no Calend\u00E1rio \u2014 agendar sozinho n\u00E3o desconta nada) e se a unidade usada \u00E9 uma das que o app sabe converter (kg, kg/ha, sacos, L, L/ha). Defensivo em dose de calda (mL/L) n\u00E3o entra no c\u00E1lculo de estoque, porque falta o volume total aplicado."],
+            ["Um produto que apliquei n\u00E3o descontou do estoque", "Confira se a aplica\u00E7\u00E3o foi registrada de verdade (n\u00E3o s\u00F3 agendada no Calend\u00E1rio \u2014 agendar sozinho n\u00E3o desconta nada) e se a unidade usada \u00E9 uma das que o app sabe converter (kg, kg/ha, sacos, L, L/ha, g/planta, mL/planta \u2014 as duas \u00FAltimas precisam do n\u00FAmero de plantas cadastrado no talh\u00E3o). Defensivo em dose de calda (mL/L) n\u00E3o entra no c\u00E1lculo de estoque, porque falta o volume total aplicado."],
             ["Registrei em v\u00E1rios talh\u00F5es e o valor ficou maior do que eu esperava", "Voc\u00EA provavelmente escolheu REPLICAR em vez de RATEAR \u2014 REPLICAR lan\u00E7a o valor completo em cada talh\u00E3o marcado (ent\u00E3o o total soma mais que o valor digitado), enquanto RATEAR divide entre eles. Edite o lan\u00E7amento se quiser trocar o modo."],
             ["Perdi o celular \u2014 como recupero os dados?", "Se a sincroniza\u00E7\u00E3o na nuvem estiver configurada (em {{Configura\u00E7\u00F5es|configuracoes}}), instale o app no aparelho novo e informe o mesmo ID de sincroniza\u00E7\u00E3o \u2014 os dados voltam sozinhos. Sem isso, s\u00F3 \u00E9 poss\u00EDvel recuperar atrav\u00E9s de um backup manual salvo anteriormente."],
             ["Um produto que eu uso n\u00E3o aparece na busca", "Digite manualmente e preencha a composi\u00E7\u00E3o voc\u00EA mesmo, se souber (vem na embalagem/bula). Produtos de uso frequente podem ser sugeridos pra entrar na base padr\u00E3o do app."],
@@ -5283,6 +5291,32 @@ function descricaoTempo(codigo) {
     };
     return mapa[codigo] || ["\ud83c\udf24\ufe0f", "\u2014"];
 }
+/* Descobre o nome da cidade a partir das coordenadas (geocodificação reversa).
+   Tenta o BigDataCloud e, se falhar, o OpenStreetMap. Devolve "Cidade - UF" ou null. */
+async function buscarNomeCidade(lat, lon) {
+    try {
+        const r = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=pt`);
+        const j = await r.json();
+        const cidade = j.city || j.locality;
+        if (cidade) {
+            const uf = String(j.principalSubdivisionCode || "").split("-")[1] || "";
+            return uf ? `${cidade} - ${uf}` : cidade;
+        }
+    }
+    catch (e) { }
+    try {
+        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&accept-language=pt-BR&lat=${lat}&lon=${lon}`);
+        const j = await r.json();
+        const a = j.address || {};
+        const cidade = a.city || a.town || a.village || a.municipality || a.county;
+        if (cidade) {
+            const uf = String(a["ISO3166-2-lvl4"] || "").split("-")[1] || "";
+            return uf ? `${cidade} - ${uf}` : cidade;
+        }
+    }
+    catch (e) { }
+    return null;
+}
 function PrevisaoTempoCard() {
     const [local, setLocal] = useState(() => {
         try {
@@ -5315,8 +5349,10 @@ function PrevisaoTempoCard() {
             return;
         }
         setStatus("localizando");
-        navigator.geolocation.getCurrentPosition((pos) => {
-            salvarLocal({ lat: pos.coords.latitude, lon: pos.coords.longitude, nome: "Minha localiza\u00E7\u00E3o" });
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+            const lat = pos.coords.latitude, lon = pos.coords.longitude;
+            const nomeCidade = await buscarNomeCidade(lat, lon);
+            salvarLocal({ lat, lon, nome: nomeCidade || "Minha localiza\u00E7\u00E3o" });
         }, () => setStatus("erro"), { timeout: 10000 });
     };
     const buscarCidade = async () => {
@@ -5360,6 +5396,21 @@ function PrevisaoTempoCard() {
             .catch(() => { if (!cancelado) setStatus("erro"); });
         return () => { cancelado = true; };
     }, [local]);
+    // Localização salva antes desta versão fica só como "Minha localização":
+    // descobre o nome da cidade sozinho e atualiza, sem o usuário refazer nada.
+    useEffect(() => {
+        if (!local || local.nome !== "Minha localiza\u00E7\u00E3o")
+            return;
+        let cancelado = false;
+        buscarNomeCidade(local.lat, local.lon).then((nomeCidade) => {
+            if (cancelado || !nomeCidade)
+                return;
+            const atualizado = { ...local, nome: nomeCidade };
+            setLocal(atualizado);
+            try { localStorage.setItem(STORAGE_PREFIX + "previsao_local", JSON.stringify(atualizado)); } catch (e) { }
+        });
+        return () => { cancelado = true; };
+    }, [local && local.lat, local && local.nome]);
     if (!local || editandoLocal) {
         return (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-4" },
             React.createElement("p", { className: "text-sm font-semibold text-stone-700 mb-2 flex items-center gap-2" },
@@ -5377,7 +5428,7 @@ function PrevisaoTempoCard() {
     return (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-4" },
         React.createElement("div", { className: "flex items-center justify-between mb-2" },
             React.createElement("p", { className: "text-sm font-semibold text-stone-700 flex items-center gap-1" }, "\ud83c\udf24\ufe0f Previs\u00E3o do tempo"),
-            React.createElement("button", { onClick: () => { setEditandoLocal(true); setResultadosBusca([]); setTermoBusca(""); }, className: "text-xs text-[#4c6146] font-semibold" }, local.nome)),
+            React.createElement("button", { onClick: () => { setEditandoLocal(true); setResultadosBusca([]); setTermoBusca(""); }, className: "text-xs text-[#4c6146] font-semibold truncate max-w-[55%] text-right" }, "\ud83d\udccd ", local.nome)),
         status === "carregando" && !previsao && React.createElement("p", { className: "text-xs text-stone-400" }, "Carregando previs\u00E3o..."),
         status === "erro" && !previsao && React.createElement("p", { className: "text-xs text-[#a8442f]" }, "N\u00E3o consegui buscar a previs\u00E3o agora. Tente de novo mais tarde."),
         previsao && (React.createElement(React.Fragment, null,
