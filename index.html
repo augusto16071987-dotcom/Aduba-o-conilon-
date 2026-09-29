@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-09-28-v115-empresa-rodape";
+const APP_VERSION = "build-2026-09-29-v116-cnpj-rodape";
 const APP_UPDATED_AT = "28/09/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -5277,7 +5277,7 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                 React.createElement("div", { className: "min-w-0" },
                     React.createElement("p", { className: "text-sm font-semibold text-stone-800" }, "Suporte e sugest\u00E3o de melhorias"),
                     React.createElement("p", { className: "text-xs text-stone-400 truncate" }, "nutricafeoficial@gmail.com"))),
-            React.createElement("p", { className: "text-center text-stone-400 text-[11px] font-medium pt-4" }, "MAA Tecnologia"),
+            React.createElement("p", { className: "text-center text-stone-400 text-[11px] font-medium pt-4" }, "MAA Tecnologia \u2014 CNPJ 40.967.587/0001-27"),
             React.createElement("p", { className: "text-center text-stone-300 text-[10px] pt-1" }, APP_VERSION_DISPLAY)),
         showTabelaForm && React.createElement(TabelaCustomizadaForm, { onClose: () => setShowTabelaForm(false), onSave: (t) => { onAddTabelaCustomizada(t); setShowTabelaForm(false); } }),
         editTabela && React.createElement(TabelaCustomizadaForm, { initial: editTabela, onClose: () => setEditTabela(null), onSave: (t) => { onUpdateTabelaCustomizada(t); setEditTabela(null); } }),
