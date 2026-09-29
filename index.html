@@ -45,8 +45,9 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-09-28-v113-cidade-ajuda";
-const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 \u00A9 2026";
+const APP_VERSION = "build-2026-09-28-v115-empresa-rodape";
+const APP_UPDATED_AT = "28/09/2026";
+const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
    ÍCONES — SVGs simples embutidos (sem dependência externa)
 ------------------------------------------------------------------*/
@@ -1365,6 +1366,60 @@ function construirRelatorioPDF(opts) {
     if (opts.subtitulo)
         doc.text(opts.subtitulo, pageW - margin, y, { align: "right" });
     y += 26;
+    // gráfico de barras agrupadas por setor: Receitas (verde) x Despesas (vermelho)
+    if (opts.graficoSetores && opts.graficoSetores.length > 0) {
+        const dados = opts.graficoSetores;
+        const larguraTotal = pageW - margin * 2;
+        const alturaGrafico = 150;
+        const areaX = margin + 46; // espaço pro eixo de valores
+        const areaW = larguraTotal - 46;
+        const topoY = y + 22;
+        doc.setFillColor(231, 235, 221);
+        doc.rect(margin, y - 4, larguraTotal, 22, "F");
+        doc.setTextColor(51, 66, 46);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text("RECEITAS X DESPESAS POR SETOR", margin + 10, y + 11);
+        const maxVal = Math.max(1, ...dados.map((d) => Math.max(d.receita, d.despesa)));
+        // linhas de grade e eixo Y (4 divisões)
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        for (let i = 0; i <= 4; i++) {
+            const gy = topoY + alturaGrafico - (alturaGrafico * i) / 4;
+            doc.setDrawColor(225, 225, 225);
+            doc.line(areaX, gy, areaX + areaW, gy);
+            doc.setTextColor(120, 120, 120);
+            doc.text("R$ " + fmtBR((maxVal * i) / 4, 0), areaX - 4, gy + 2, { align: "right" });
+        }
+        const grupoW = areaW / dados.length;
+        const barraW = Math.min(22, (grupoW - 8) / 2);
+        dados.forEach((d, i) => {
+            const cx = areaX + grupoW * i + grupoW / 2;
+            const hR = (d.receita / maxVal) * alturaGrafico;
+            const hD = (d.despesa / maxVal) * alturaGrafico;
+            doc.setFillColor(47, 125, 58);
+            if (hR > 0)
+                doc.rect(cx - barraW, topoY + alturaGrafico - hR, barraW, hR, "F");
+            doc.setFillColor(193, 68, 58);
+            if (hD > 0)
+                doc.rect(cx, topoY + alturaGrafico - hD, barraW, hD, "F");
+            doc.setTextColor(87, 83, 78);
+            doc.setFontSize(7);
+            const nomeCurto = doc.splitTextToSize(String(d.nome), grupoW - 2).slice(0, 2);
+            doc.text(nomeCurto, cx, topoY + alturaGrafico + 11, { align: "center" });
+        });
+        // legenda
+        const ly = topoY + alturaGrafico + 34;
+        doc.setFillColor(47, 125, 58);
+        doc.rect(areaX, ly - 7, 9, 9, "F");
+        doc.setTextColor(60, 60, 60);
+        doc.setFontSize(9);
+        doc.text("Receitas", areaX + 14, ly);
+        doc.setFillColor(193, 68, 58);
+        doc.rect(areaX + 80, ly - 7, 9, 9, "F");
+        doc.text("Despesas", areaX + 94, ly);
+        y = ly + 26;
+    }
     opts.secoes.forEach((secao) => {
         if (y > 740) {
             doc.addPage();
@@ -4618,8 +4673,9 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
                 ] },
             { titulo: "Despesas gerais por categoria", linhas: CATEGORIAS_DESPESA.filter((c) => despesasPorCategoria[c] > 0).map((c) => [c, "R$ " + fmtBR(despesasPorCategoria[c], 2)]) },
             { titulo: "Compras por categoria", linhas: CATEGORIAS_COMPRA.filter((c) => comprasPorCategoria[c] > 0).map((c) => [c, "R$ " + fmtBR(comprasPorCategoria[c], 2)]) },
-            { titulo: "Por talh\u00E3o", linhas: linhas.map((l) => [l.talhao.nome, "Gasto R$ " + fmtBR(l.totalGasto, 2) + " \u00B7 Lucro R$ " + fmtBR(l.lucro, 2)]) },
+            { titulo: "Por setor (talh\u00E3o)", linhas: [...linhas].sort((a, b) => b.totalGasto - a.totalGasto).map((l) => [l.talhao.nome, "Receita R$ " + fmtBR(l.totalReceita, 2) + " \u00B7 Despesa R$ " + fmtBR(l.totalGasto, 2) + " \u00B7 Lucro R$ " + fmtBR(l.lucro, 2)]) },
         ],
+        graficoSetores: [...linhas].sort((a, b) => b.totalGasto - a.totalGasto).map((l) => ({ nome: l.talhao.nome, receita: l.totalReceita, despesa: l.totalGasto })),
         observacao: "Gasto por talh\u00E3o vem do custo calculado em cada aduba\u00E7\u00E3o/defensivo aplicado (com base no pre\u00E7o da compra) + despesas gerais. \"Total comprado\" \u00E9 o valor gasto em compras no per\u00EDodo, que pode ser maior do que o j\u00E1 aplicado se ainda tiver estoque guardado.",
     });
     const linhaSelecionada = talhaoId !== "todos" ? linhas.find((l) => l.talhao.id === talhaoId) : null;
@@ -4979,7 +5035,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
             ["Gr\u00E1fico por setor", "Barras lado a lado por talh\u00E3o (setor): Receitas em verde e Despesas em vermelho, ordenadas do setor que mais gastou pro que menos gastou. Toque numa barra pra ver o valor exato em reais. S\u00F3 aparece quando j\u00E1 existe algum lan\u00E7amento no ano selecionado."],
             ["Gasto por categoria", "Separa por Aduba\u00E7\u00E3o, Defensivo, Herbicida (categoria pr\u00F3pria, n\u00E3o entra mais junto com Defensivo), M\u00E3o de obra, Combust\u00EDvel, etc."],
             ["Herbicida aplicado", "No detalhe de cada talh\u00E3o, um card mostra o total de bombadas, litros de calda pulverizada e quantidade de produto usados no ano \u2014 separado por produto, se foi mistura."],
-            ["PDF e compartilhar", "Gera relat\u00F3rio completo pra salvar ou mandar no WhatsApp, tanto da vis\u00E3o geral quanto de um talh\u00E3o s\u00F3."],
+            ["PDF e compartilhar", "Gera relat\u00F3rio completo pra salvar ou mandar no WhatsApp, tanto da vis\u00E3o geral quanto de um talh\u00E3o s\u00F3. O PDF da vis\u00E3o geral traz o mesmo gr\u00E1fico da tela (Receitas em verde x Despesas em vermelho, setor por setor) e, logo abaixo, a lista com receita, despesa e lucro de cada setor."],
         ] },
         { id: "comunidade", titulo: "\ud83d\udcac Comunidade", itens: [
             ["O que \u00E9", "Um espa\u00E7o s\u00F3 pra assinantes conversarem entre si e trocarem experi\u00EAncias \u2014 toque no \u00EDcone de bal\u00E3o de conversa, no topo da tela inicial, ao lado de Ajuda e Configura\u00E7\u00F5es."],
@@ -5221,7 +5277,8 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                 React.createElement("div", { className: "min-w-0" },
                     React.createElement("p", { className: "text-sm font-semibold text-stone-800" }, "Suporte e sugest\u00E3o de melhorias"),
                     React.createElement("p", { className: "text-xs text-stone-400 truncate" }, "nutricafeoficial@gmail.com"))),
-            React.createElement("p", { className: "text-center text-stone-300 text-[10px] pt-6" }, APP_VERSION_DISPLAY)),
+            React.createElement("p", { className: "text-center text-stone-400 text-[11px] font-medium pt-4" }, "MAA Tecnologia"),
+            React.createElement("p", { className: "text-center text-stone-300 text-[10px] pt-1" }, APP_VERSION_DISPLAY)),
         showTabelaForm && React.createElement(TabelaCustomizadaForm, { onClose: () => setShowTabelaForm(false), onSave: (t) => { onAddTabelaCustomizada(t); setShowTabelaForm(false); } }),
         editTabela && React.createElement(TabelaCustomizadaForm, { initial: editTabela, onClose: () => setEditTabela(null), onSave: (t) => { onUpdateTabelaCustomizada(t); setEditTabela(null); } }),
         tabelaParaExcluir && React.createElement(ConfirmModal, {
