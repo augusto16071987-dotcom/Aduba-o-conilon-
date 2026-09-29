@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-09-29-v116-cnpj-rodape";
+const APP_VERSION = "build-2026-09-29-v117-rodape-inicial";
 const APP_UPDATED_AT = "28/09/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -6600,7 +6600,8 @@ function App() {
                 React.createElement("button", { onClick: () => setShowTalhaoForm(true), className: "w-full flex items-center justify-center gap-2 bg-[#33422e] text-white rounded-2xl py-3.5 text-sm font-semibold active:bg-[#252f20] shadow-sm" },
                     React.createElement(Icon, { name: "plus", size: 18 }),
                     " Novo talh\u00E3o"),
-                React.createElement("p", { className: "text-center text-stone-300 text-[10px] pt-6" }, APP_VERSION_DISPLAY)))),
+                React.createElement("p", { className: "text-center text-stone-400 text-[11px] font-medium pt-4" }, "MAA Tecnologia \u2014 CNPJ 40.967.587/0001-27"),
+                React.createElement("p", { className: "text-center text-stone-300 text-[10px] pt-1" }, APP_VERSION_DISPLAY)))),
         showTalhaoForm && React.createElement(TalhaoForm, { tabelas: todasTabelas, onClose: () => setShowTalhaoForm(false), onSave: addTalhao }),
         editTalhao && React.createElement(TalhaoForm, { initial: editTalhao, tabelas: todasTabelas, onClose: () => setEditTalhao(null), onSave: updateTalhao }),
         showIrrigacaoHome && React.createElement(IrrigacaoForm, { talhoes: talhoes, onClose: () => setShowIrrigacaoHome(false), onSave: (a) => {
