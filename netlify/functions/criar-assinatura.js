@@ -5,100 +5,36 @@
 // configurados no próprio plano) e devolve o link de checkout (init_point)
 // pro app redirecionar o navegador.
 //
+// Proteção contra cobrança em duplicidade: antes de criar, consulta o Mercado
+// Pago pelo e-mail. Se já existe assinatura ATIVA desse e-mail, não cria outra
+// (manda o cliente usar "Recuperar acesso"). Se já existe uma pendente criada
+// por este mesmo aparelho, reaproveita o link em vez de gerar outra.
+//
 // Precisa da variável de ambiente MP_ACCESS_TOKEN configurada no Netlify
 // (Project configuration > Environment variables). NUNCA coloque o token
 // direto no código.
 
-// IMPORTANTE: assinatura vinculada a um plano (preapproval_plan_id) SEMPRE
-// exige card_token_id + status "authorized" na hora da criação (regra do
-// próprio Mercado Pago) — não existe fluxo de redirecionamento por esse
-// caminho. Por isso criamos a assinatura direto, com os dados do plano
-// embutidos aqui (auto_recurring), sem preapproval_plan_id e sem cartão.
-// Isso devolve status "pending" + init_point pro cliente completar o
-// cadastro do cartão na página do Mercado Pago.
-const PLANO = {
-    reason: "Assinatura NutriCafé",
-    transaction_amount: 9.99,
-    currency_id: "BRL",
-    frequency: 1,
-    frequency_type: "months",
-    free_trial_frequency: 30,
-    free_trial_frequency_type: "days",
-};
+const MP_PLAN_ID = "aa2f72dffb8b4450aafd948385c14c21";
 
-const FIREBASE_PROJECT_ID = "backup-bb0d9";
-const FIRESTORE_COLECAO = "nutricafe_dados";
-
-function firestoreDocUrl(docId) {
-    return "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
-        "/databases/(default)/documents/" + FIRESTORE_COLECAO + "/" + docId;
+function normalizarEmail(e) {
+    return String(e || "").trim().toLowerCase();
 }
 
-const crypto = require("crypto");
-function base64url(input) {
-    return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-// Gera um token de acesso "de servidor" a partir da chave de serviço do
-// Firebase (variável de ambiente FIREBASE_SERVICE_ACCOUNT). Esse token
-// ignora as regras de segurança do Firestore — só o servidor consegue
-// gerar ele, porque só o servidor tem a chave privada.
-async function obterTokenAdmin() {
-    const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    const agora = Math.floor(Date.now() / 1000);
-    const header = { alg: "RS256", typ: "JWT" };
-    const claim = {
-        iss: sa.client_email,
-        scope: "https://www.googleapis.com/auth/datastore",
-        aud: "https://oauth2.googleapis.com/token",
-        exp: agora + 3600,
-        iat: agora,
-    };
-    const semAssinar = base64url(JSON.stringify(header)) + "." + base64url(JSON.stringify(claim));
-    const assinador = crypto.createSign("RSA-SHA256");
-    assinador.update(semAssinar);
-    assinador.end();
-    const assinatura = assinador.sign(sa.private_key).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    const jwt = semAssinar + "." + assinatura;
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=" + encodeURIComponent(jwt),
+// Busca no Mercado Pago as assinaturas deste plano feitas com o e-mail
+// informado. Filtra de novo aqui dentro (e-mail e plano) pra nunca depender
+// só do filtro do Mercado Pago: se ele ignorasse algum parâmetro, a gente
+// poderia bloquear a pessoa errada.
+async function buscarAssinaturasDoEmail(accessToken, email) {
+    const params = new URLSearchParams({ payer_email: email, preapproval_plan_id: MP_PLAN_ID, limit: "50" });
+    const res = await fetch("https://api.mercadopago.com/preapproval/search?" + params.toString(), {
+        headers: { "Authorization": "Bearer " + accessToken },
     });
-    const dados = await res.json();
-    if (!dados.access_token) throw new Error("Não consegui autenticar com o Firebase (admin).");
-    return dados.access_token;
-}
-
-// Salva um registro na nuvem assim que a assinatura é criada (mesmo que o
-// cliente ainda não tenha cadastrado o cartão). Isso garante que o nome
-// dele já fique disponível pra localização manual no painel de suporte,
-// mesmo que ele desista do checkout do Mercado Pago.
-async function salvarRegistroInicial(clienteId, nome, email, preapprovalId) {
-    const docId = ("assinatura--" + clienteId).replace(/[^a-zA-Z0-9_-]/g, "_");
-    const campos = {
-        status: { stringValue: "pending" },
-        preapprovalId: { stringValue: preapprovalId || "" },
-        email: { stringValue: email || "" },
-        nome: { stringValue: nome || "" },
-        atualizadoEm: { stringValue: new Date().toISOString() },
-    };
-    try {
-        const token = await obterTokenAdmin();
-        await fetch(
-            firestoreDocUrl(docId) +
-                "?updateMask.fieldPaths=status&updateMask.fieldPaths=preapprovalId" +
-                "&updateMask.fieldPaths=email&updateMask.fieldPaths=nome&updateMask.fieldPaths=atualizadoEm",
-            {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-                body: JSON.stringify({ fields: campos }),
-            }
-        );
-    } catch (e) {
-        // Não deixa isso quebrar a criação da assinatura — é só um registro auxiliar.
-        console.error("Falha ao salvar registro inicial:", e);
-    }
+    if (!res.ok) throw new Error("busca no Mercado Pago falhou: HTTP " + res.status);
+    const json = await res.json();
+    const alvo = normalizarEmail(email);
+    return (json.results || []).filter((a) =>
+        normalizarEmail(a.payer_email) === alvo &&
+        (!a.preapproval_plan_id || a.preapproval_plan_id === MP_PLAN_ID));
 }
 
 exports.handler = async (event) => {
@@ -125,6 +61,32 @@ exports.handler = async (event) => {
 
     const siteUrl = "https://" + (event.headers.host || "nutricafe-conilon.netlify.app");
 
+    // Evita cobrança em duplicidade (ver cabeçalho). Se a consulta falhar,
+    // segue e cria normalmente: melhor não travar uma assinatura nova do que
+    // bloquear um cliente por erro de rede.
+    try {
+        const existentes = await buscarAssinaturasDoEmail(ACCESS_TOKEN, email);
+        if (existentes.some((a) => a.status === "authorized")) {
+            return {
+                statusCode: 409,
+                body: JSON.stringify({
+                    erro: "Já existe uma assinatura ativa com esse e-mail. Volte e toque em \"Já é assinante? Recuperar acesso\", usando o mesmo e-mail — sem pagar de novo.",
+                    jaAssinante: true,
+                }),
+            };
+        }
+        const pendenteDesteAparelho = existentes.find((a) =>
+            a.status === "pending" && a.external_reference === clienteId && a.init_point);
+        if (pendenteDesteAparelho) {
+            return {
+                statusCode: 200,
+                body: JSON.stringify({ initPoint: pendenteDesteAparelho.init_point, preapprovalId: pendenteDesteAparelho.id, reaproveitada: true }),
+            };
+        }
+    } catch (e) {
+        console.error("criar-assinatura: não consegui conferir assinaturas existentes —", String(e));
+    }
+
     try {
         const resposta = await fetch("https://api.mercadopago.com/preapproval", {
             method: "POST",
@@ -133,20 +95,12 @@ exports.handler = async (event) => {
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({
-                reason: PLANO.reason + (nome ? " — " + nome : ""),
+                preapproval_plan_id: MP_PLAN_ID,
+                reason: "Assinatura NutriCafé" + (nome ? " — " + nome : ""),
                 external_reference: clienteId,
                 payer_email: email,
                 back_url: siteUrl + "/?assinatura=voltou",
-                auto_recurring: {
-                    frequency: PLANO.frequency,
-                    frequency_type: PLANO.frequency_type,
-                    transaction_amount: PLANO.transaction_amount,
-                    currency_id: PLANO.currency_id,
-                    free_trial: {
-                        frequency: PLANO.free_trial_frequency,
-                        frequency_type: PLANO.free_trial_frequency_type,
-                    },
-                },
+                status: "pending",
             }),
         });
 
@@ -158,8 +112,6 @@ exports.handler = async (event) => {
                 body: JSON.stringify({ erro: dados.message || "O Mercado Pago recusou o pedido.", detalhes: dados }),
             };
         }
-
-        await salvarRegistroInicial(clienteId, nome, email, dados.id);
 
         return {
             statusCode: 200,
