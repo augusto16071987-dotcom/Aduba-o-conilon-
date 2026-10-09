@@ -12,6 +12,10 @@
 
 const SENHA_ADMIN = "cafe-suporte-2026";
 
+// Marca de versão: abrir o endereço da função no navegador mostra este texto,
+// o que prova que o Netlify publicou esta versão e não a antiga.
+const VERSAO = "v2-duplicatas-2026-10-09";
+
 const FIREBASE_PROJECT_ID = "backup-bb0d9";
 const FIRESTORE_COLECAO = "nutricafe_dados";
 
@@ -89,7 +93,7 @@ async function listarRegistrosDeAssinatura() {
 
 exports.handler = async (event) => {
     if (event.httpMethod !== "POST") {
-        return { statusCode: 405, body: JSON.stringify({ erro: "Método não permitido" }) };
+        return { statusCode: 405, body: JSON.stringify({ erro: "Método não permitido", versao: VERSAO }) };
     }
 
     let corpo;
@@ -130,17 +134,22 @@ exports.handler = async (event) => {
                 body: JSON.stringify({ erro: "Nenhum cliente encontrado com esse nome (e e-mail, se informado). Ele precisa ter aberto a tela de assinatura no app pelo menos uma vez." }),
             };
         }
-        if (encontrados.length > 1) {
+        // Cada instalação do app (navegador, atalho na tela inicial, dados
+        // limpos) cria um cadastro próprio. Se todos os cadastros achados têm
+        // o MESMO e-mail, é a mesma pessoa em vários aparelhos: libera todos.
+        const emailsUnicos = new Set(encontrados.map((r) => normalizar(r.email)));
+        const mesmaPessoa = encontrados.length > 1 && emailsUnicos.size === 1 && !emailsUnicos.has("");
+        if (encontrados.length > 1 && !mesmaPessoa) {
             return {
                 statusCode: 409,
                 body: JSON.stringify({
                     erro: "Mais de um cliente encontrado com esse nome. Informe também o e-mail pra identificar certo.",
                     opcoes: encontrados.map((r) => ({ nome: r.nome, email: r.email })),
+                    versao: VERSAO,
                 }),
             };
         }
 
-        const alvo = encontrados[0];
         const validoAte = new Date();
         validoAte.setMonth(validoAte.getMonth() + numMeses);
 
@@ -154,19 +163,26 @@ exports.handler = async (event) => {
             "&updateMask.fieldPaths=validoAte&updateMask.fieldPaths=atualizadoEm";
 
         const token = await obterTokenAdmin();
-        await fetch(baseUrl() + "/" + alvo.docId + mask, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-            body: JSON.stringify({ fields: campos }),
-        });
+        for (const alvo of encontrados) {
+            const resp = await fetch(baseUrl() + "/" + alvo.docId + mask, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+                body: JSON.stringify({ fields: campos }),
+            });
+            if (!resp.ok) {
+                const detalhe = await resp.text();
+                return { statusCode: 500, body: JSON.stringify({ erro: "Não consegui gravar a liberação.", detalhes: detalhe }) };
+            }
+        }
 
         return {
             statusCode: 200,
             body: JSON.stringify({
                 ok: true,
-                nome: alvo.nome,
-                email: alvo.email,
+                nome: encontrados[0].nome,
+                email: encontrados[0].email,
                 validoAte: validoAte.toISOString(),
+                cadastrosLiberados: encontrados.length,
             }),
         };
     } catch (e) {
