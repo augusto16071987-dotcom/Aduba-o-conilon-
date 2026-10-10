@@ -45,8 +45,8 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-09-29-v117-rodape-inicial";
-const APP_UPDATED_AT = "28/09/2026";
+const APP_VERSION = "build-2026-10-10-v119-pago-desde-inicio";
+const APP_UPDATED_AT = "10/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
    ÍCONES — SVGs simples embutidos (sem dependência externa)
@@ -727,24 +727,18 @@ const STORAGE_PREFIX = "adubacao_conilon_";
    simples para uso comum.
 ------------------------------------------------------------------*/
 const ATIVACAO_STORAGE_KEY = STORAGE_PREFIX + "ativacao";
-const CLIENTE_ID_KEY = STORAGE_PREFIX + "cliente_id";
 const WHATSAPP_NUMERO = "5561983819713";
-const MP_PLAN_CHECKOUT = "https://mpago.la/1UwNYWW"; // link do plano — só usado como referência/fallback
+const PLANOS_ASSINATURA = [
+    { id: "mensal", rotulo: "1 mês", preco: "R$ 9,90", detalhe: "R$ 9,90 por mês" },
+    { id: "semestral", rotulo: "6 meses", preco: "R$ 55,00", detalhe: "Economiza R$ 4,40 • R$ 9,17 por mês" },
+    { id: "anual", rotulo: "1 ano", preco: "R$ 100,00", detalhe: "Economiza R$ 18,80 • R$ 8,33 por mês", destaque: true },
+];
 function linkWhatsApp(mensagem) {
     return "https://wa.me/" + WHATSAPP_NUMERO + "?text=" + encodeURIComponent(mensagem);
 }
-function getClienteId() {
-    try {
-        let id = localStorage.getItem(CLIENTE_ID_KEY);
-        if (!id) {
-            id = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
-            localStorage.setItem(CLIENTE_ID_KEY, id);
-        }
-        return id;
-    }
-    catch (e) {
-        return "sem-id-" + Math.random().toString(36).slice(2, 10);
-    }
+function fmtDataBR(ms) {
+    const d = new Date(Number(ms));
+    return String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0") + "/" + d.getFullYear();
 }
 function lerAtivacao() {
     try {
@@ -761,167 +755,187 @@ function salvarAtivacao(dados) {
     }
     catch (e) { }
 }
+// Acesso liberado = existe um código salvo e a validade (confirmada pelo
+// servidor da última vez que houve internet) ainda não passou. Se o
+// relógio do aparelho foi voltado pra trás, não vale.
 function ativacaoValida() {
     const a = lerAtivacao();
-    if (!a || a.status !== "authorized") return false;
-    if (a.validoAte && new Date(a.validoAte) < new Date()) return false;
-    return true;
+    if (!a || !a.codigo || !a.validoAte) return false;
+    const agora = Date.now();
+    if (a.ultimoVisto && agora < Number(a.ultimoVisto) - 10 * 60 * 1000) return false;
+    return Number(a.validoAte) > agora;
 }
-// Consulta o status da assinatura direto no Firestore (não depende da
-// sincronização estar ativada — a assinatura é um recurso à parte).
-async function verificarStatusAssinaturaNaNuvem(clienteId) {
-    const docId = ("assinatura--" + clienteId).replace(/[^a-zA-Z0-9_-]/g, "_");
+function guardarAtivacaoDoServidor(info) {
+    salvarAtivacao({ codigo: info.codigo, nome: info.nome, email: info.email, validoAte: info.validoAte, trial: !!info.trial, ultimoVisto: info.agora || Date.now() });
+}
+// Pergunta ao servidor a validade do código. Devolve { ok:true, ... } ou { ok:false, erro, rede }.
+async function consultarStatusAssinatura(codigo) {
     try {
-        const res = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/${FIRESTORE_COLECAO}/${docId}`, { cache: "no-store" });
-        if (!res.ok)
-            return null;
-        const json = await res.json();
-        const f = json.fields || {};
-        return {
-            status: f.status ? f.status.stringValue : null,
-            preapprovalId: f.preapprovalId ? f.preapprovalId.stringValue : null,
-            email: f.email ? f.email.stringValue : null,
-            atualizadoEm: f.atualizadoEm ? f.atualizadoEm.stringValue : null,
-            validoAte: f.validoAte ? f.validoAte.stringValue : null,
-            proximaCobranca: f.proximaCobranca ? f.proximaCobranca.stringValue : null,
-            liberadoManualmente: f.liberadoManualmente ? !!f.liberadoManualmente.booleanValue : false,
-        };
+        const res = await fetch("/.netlify/functions/status", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ codigo }), cache: "no-store",
+        });
+        const dados = await res.json();
+        if (!res.ok || !dados.ok) return { ok: false, erro: dados.erro || "Não consegui verificar agora.", rede: false, naoEncontrado: res.status === 404 };
+        return dados;
     }
     catch (e) {
-        return null;
+        return { ok: false, erro: "Sem conexão com a internet.", rede: true };
     }
 }
 function TelaAssinatura({ onAtivado }) {
-    const clienteId = getClienteId();
-    const registroAnterior = lerAtivacao();
-    const [etapa, setEtapa] = useState(registroAnterior && registroAnterior.status && registroAnterior.status !== "authorized" ? "aguardando" : "form");
-    const [nome, setNome] = useState(registroAnterior ? registroAnterior.nome || "" : "");
-    const [email, setEmail] = useState(registroAnterior ? registroAnterior.email || "" : "");
+    const anterior = lerAtivacao();
+    const CHAVE_PEDIDO = STORAGE_PREFIX + "pedido_pendente";
+    const lerPedido = () => { try { return localStorage.getItem(CHAVE_PEDIDO) || ""; } catch (e) { return ""; } };
+    const [etapa, setEtapa] = useState(anterior && anterior.codigo ? "renovar" : (lerPedido() ? "aguardando" : "ativar"));
+    const [nome, setNome] = useState("");
+    const [email, setEmail] = useState("");
+    const [email2, setEmail2] = useState("");
+    const [plano, setPlano] = useState("anual");
+    const [codigo, setCodigo] = useState("");
     const [erro, setErro] = useState("");
-    const [enviando, setEnviando] = useState(false);
-    const [verificando, setVerificando] = useState(false);
-    // Recuperar acesso: pra quando o cliente já assinou antes (em outro
-    // aparelho, ou depois de limpar os dados) e só precisa reconectar,
-    // sem passar pelo Mercado Pago de novo.
-    const [mostrarRecuperar, setMostrarRecuperar] = useState(false);
-    const [emailRecuperar, setEmailRecuperar] = useState("");
-    const [recuperando, setRecuperando] = useState(false);
-    const [erroRecuperar, setErroRecuperar] = useState("");
-    const recuperarAcesso = async () => {
-        if (!emailRecuperar.trim()) return;
-        setRecuperando(true);
-        setErroRecuperar("");
-        try {
-            const res = await fetch("/.netlify/functions/recuperar-assinatura", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email: emailRecuperar.trim(), clienteId }),
-            });
-            const dados = await res.json();
-            if (!res.ok || !dados.ok) {
-                setErroRecuperar(dados.erro || "Não consegui recuperar agora. Tente de novo.");
-                setRecuperando(false);
-                return;
-            }
-            salvarAtivacao({ clienteId, nome: dados.nome, email: dados.email, status: "authorized", ativadoEm: new Date().toISOString(), preapprovalId: dados.preapprovalId, validoAte: dados.validoAte || null, proximaCobranca: dados.proximaCobranca || null, liberadoManualmente: !!dados.liberadoManualmente });
-            onAtivado();
-        } catch (e) {
-            setErroRecuperar("Não foi possível conectar agora. Confira sua internet e tente de novo.");
-        }
-        setRecuperando(false);
+    const [aviso, setAviso] = useState("");
+    const [ocupado, setOcupado] = useState(false);
+    const [aguardando, setAguardando] = useState(() => { try { return !!localStorage.getItem(STORAGE_PREFIX + "aguardando_pagamento"); } catch (e) { return false; } });
+    const aoValidar = (info) => {
+        guardarAtivacaoDoServidor(info);
+        try { localStorage.removeItem(STORAGE_PREFIX + "aguardando_pagamento"); localStorage.removeItem(CHAVE_PEDIDO); } catch (e) { }
+        if (info.ativo) onAtivado();
+        else { setEtapa("renovar"); setErro("Este código está vencido. Escolha um plano abaixo pra renovar."); }
     };
-    const statusAtual = registroAnterior ? registroAnterior.status : null;
-    const cancelada = statusAtual === "cancelled" || statusAtual === "paused";
-    const conferirAgora = async () => {
-        setVerificando(true);
+    const validarCodigo = async (cod) => {
+        setErro(""); setOcupado(true);
+        const info = await consultarStatusAssinatura(cod);
+        if (info.ok) aoValidar(info); else setErro(info.erro);
+        setOcupado(false);
+    };
+    const post = async (rota, corpo) => {
+        const res = await fetch("/.netlify/functions/" + rota, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
+        return { res, d: await res.json() };
+    };
+    // primeira ativação: cria o pedido e vai pro pagamento
+    const comprar = async () => {
         setErro("");
-        const info = await verificarStatusAssinaturaNaNuvem(clienteId);
-        if (info && info.status === "authorized") {
-            salvarAtivacao({ clienteId, nome, email: info.email || email, status: "authorized", ativadoEm: registroAnterior ? registroAnterior.ativadoEm : new Date().toISOString(), preapprovalId: info.preapprovalId, validoAte: info.validoAte || null, proximaCobranca: info.proximaCobranca || null, liberadoManualmente: !!info.liberadoManualmente });
-            onAtivado();
+        if (email.trim().toLowerCase() !== email2.trim().toLowerCase()) { setErro("Os dois e-mails não são iguais. O código será enviado para esse e-mail, confira com calma."); return; }
+        setOcupado(true);
+        try {
+            const { res, d } = await post("iniciar-compra", { nome: nome.trim(), email: email.trim(), plano });
+            if (!res.ok || !d.url) { setErro(d.erro || "Não consegui abrir o pagamento."); setOcupado(false); return; }
+            try { localStorage.setItem(CHAVE_PEDIDO, d.pedido); } catch (e) { }
+            window.location.href = d.url;
         }
-        else if (info && (info.status === "cancelled" || info.status === "paused")) {
-            salvarAtivacao({ ...(registroAnterior || {}), clienteId, status: info.status });
-            setErro("Essa assinatura está " + (info.status === "cancelled" ? "cancelada" : "pausada") + ". Assine novamente pra continuar usando.");
-        }
-        else {
-            setErro("Ainda não confirmamos o pagamento. Se você acabou de assinar, aguarde alguns segundos e tente de novo.");
-        }
-        setVerificando(false);
+        catch (e) { setErro("Sem conexão com a internet. Tente de novo."); setOcupado(false); }
     };
-    // ao voltar do checkout do Mercado Pago, confere automaticamente
+    // renovação de quem já tem código
+    const pagar = async (pl) => {
+        setErro(""); setOcupado(true);
+        try {
+            const { res, d } = await post("criar-pagamento", { codigo: anterior.codigo, plano: pl });
+            if (!res.ok || !d.url) { setErro(d.erro || "Não consegui abrir o pagamento."); setOcupado(false); return; }
+            try { localStorage.setItem(STORAGE_PREFIX + "aguardando_pagamento", String(Date.now())); } catch (e) { }
+            window.location.href = d.url;
+        }
+        catch (e) { setErro("Sem conexão com a internet. Tente de novo."); setOcupado(false); }
+    };
+    const reenviar = async (em) => {
+        setErro(""); setAviso(""); setOcupado(true);
+        try {
+            const { d } = await post("reenviar-codigo", { email: em.trim() });
+            if (d.ok) setAviso(d.aviso); else setErro(d.erro || "Não consegui reenviar agora.");
+        }
+        catch (e) { setErro("Sem conexão com a internet."); }
+        setOcupado(false);
+    };
+    // depois de pagar: confere sozinho a cada poucos segundos
     useEffect(() => {
         if (etapa === "aguardando") {
-            conferirAgora();
-            const t = setInterval(conferirAgora, 8000);
+            const ped = lerPedido();
+            if (!ped) return;
+            const conferir = async () => {
+                try {
+                    const res = await fetch("/.netlify/functions/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pedido: ped }), cache: "no-store" });
+                    const d = await res.json();
+                    if (d && d.ok) aoValidar(d);
+                } catch (e) { }
+            };
+            conferir();
+            const t = setInterval(conferir, 5000);
             return () => clearInterval(t);
         }
-    }, [etapa]);
-    const comecarTeste = async () => {
-        if (!nome.trim() || !email.trim())
-            return;
-        setErro("");
-        setEnviando(true);
-        try {
-            const res = await fetch("/.netlify/functions/criar-assinatura", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ clienteId, nome: nome.trim(), email: email.trim() }),
-            });
-            const dados = await res.json();
-            if (!res.ok || !dados.initPoint) {
-                setErro(dados.erro || "Não consegui iniciar sua assinatura agora. Tente de novo em instantes.");
-                setEnviando(false);
-                return;
-            }
-            salvarAtivacao({ clienteId, nome: nome.trim(), email: email.trim(), status: "pending", ativadoEm: new Date().toISOString(), preapprovalId: dados.preapprovalId });
-            window.location.href = dados.initPoint;
+        if (etapa === "renovar" && aguardando && anterior && anterior.codigo) {
+            const conferir = async () => { const info = await consultarStatusAssinatura(anterior.codigo); if (info.ok && info.ativo) aoValidar(info); };
+            conferir();
+            const t = setInterval(conferir, 6000);
+            return () => clearInterval(t);
         }
-        catch (e) {
-            setErro("Não foi possível conectar agora — confira sua internet e tente de novo.");
-            setEnviando(false);
-        }
-    };
-    if (etapa === "aguardando") {
-        return (React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6" },
-            React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl border border-stone-200 p-6 text-center" },
-                React.createElement("div", { className: "w-14 h-14 rounded-full bg-[#e7ebdd] text-[#33422e] flex items-center justify-center mx-auto mb-3" },
-                    React.createElement(Icon, { name: "leaf", size: 26 })),
-                React.createElement("h1", { className: "text-lg font-bold text-stone-800" }, "NutriCaf\u00E9"),
-                cancelada ? (React.createElement("p", { className: "text-sm text-[#a8442f] mt-1 mb-4" }, "Sua assinatura n\u00E3o est\u00E1 ativa no momento.")) : (React.createElement("p", { className: "text-sm text-stone-500 mt-1 mb-4" }, "Confirmando sua assinatura com o Mercado Pago\u2026 isso costuma levar s\u00F3 alguns segundos.")),
-                !cancelada && React.createElement("div", { className: "flex justify-center mb-4" },
-                    React.createElement(Icon, { name: "leaf", size: 22, className: "text-[#4c6146] animate-pulse" })),
-                erro && React.createElement("p", { className: "text-xs text-[#a8442f] mb-3" }, erro),
-                React.createElement("button", { onClick: conferirAgora, disabled: verificando, className: "w-full bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, verificando ? "Verificando..." : "Verificar agora"),
-                cancelada && React.createElement("button", { onClick: () => setEtapa("form"), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "Assinar novamente"),
-                React.createElement("a", { href: linkWhatsApp("Olá! Estou com dificuldade pra confirmar minha assinatura do NutriCafé."), target: "_blank", rel: "noopener noreferrer", className: "w-full mt-3 flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold" },
-                    React.createElement(Icon, { name: "whatsapp", size: 17 }),
-                    " Preciso de ajuda"))));
-    }
-    return (React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6" },
+    }, [etapa, aguardando]);
+    const Cartao = (filhos) => React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6 py-8" },
         React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl border border-stone-200 p-6" },
             React.createElement("div", { className: "w-14 h-14 rounded-full bg-[#e7ebdd] text-[#33422e] flex items-center justify-center mx-auto mb-3" },
                 React.createElement(Icon, { name: "leaf", size: 26 })),
-            React.createElement("h1", { className: "text-lg font-bold text-stone-800 text-center" }, "NutriCaf\u00E9"),
-            React.createElement("p", { className: "text-sm text-stone-500 text-center mt-1 mb-4" }, "30 dias grátis pra testar. Depois, R$ 9,99/mês — cancele quando quiser."),
-            React.createElement(Field, { label: "Seu nome" },
-                React.createElement("input", { className: inputCls, placeholder: "Nome completo", value: nome, onChange: (e) => setNome(e.target.value), disabled: enviando })),
-            React.createElement(Field, { label: "Seu e-mail" },
-                React.createElement("input", { type: "email", className: inputCls, placeholder: "seu@email.com", value: email, onChange: (e) => setEmail(e.target.value), disabled: enviando })),
-            erro && React.createElement("p", { className: "text-xs text-[#a8442f] mb-2" }, erro),
-            React.createElement("button", { onClick: comecarTeste, disabled: !nome.trim() || !email.trim() || enviando, className: "w-full mt-2 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, enviando ? "Preparando..." : "Come\u00E7ar teste gr\u00E1tis de 30 dias"),
-            React.createElement("p", { className: "text-[11px] text-stone-400 text-center mt-2" }, "Voc\u00EA vai ser levado ao Mercado Pago pra cadastrar um cart\u00E3o v\u00E1lido. Nada \u00E9 cobrado nos primeiros 30 dias."),
-            !mostrarRecuperar ? (
-                React.createElement("button", { onClick: () => setMostrarRecuperar(true), className: "w-full text-center text-xs text-[#4c6146] font-semibold mt-4 underline" }, "J\u00E1 \u00E9 assinante? Recuperar acesso")
-            ) : (
-                React.createElement("div", { className: "mt-4 bg-[#f2ece0] rounded-lg p-3" },
-                    React.createElement("p", { className: "text-xs font-semibold text-stone-600 mb-2" }, "Digite o e-mail que voc\u00EA usou pra assinar \u2014 a gente reconecta seu acesso, sem precisar assinar de novo."),
-                    React.createElement("input", { type: "email", className: inputCls + " mb-2", placeholder: "seu@email.com", value: emailRecuperar, onChange: (e) => { setEmailRecuperar(e.target.value); setErroRecuperar(""); }, disabled: recuperando }),
-                    erroRecuperar && React.createElement("p", { className: "text-xs text-[#a8442f] mb-2" }, erroRecuperar),
-                    React.createElement("button", { onClick: recuperarAcesso, disabled: !emailRecuperar.trim() || recuperando, className: "w-full bg-[#33422e] text-white font-semibold rounded-lg py-2.5 text-sm disabled:opacity-40" }, recuperando ? "Verificando..." : "Recuperar acesso"))),
-            React.createElement("a", { href: linkWhatsApp("Olá! Tenho uma dúvida sobre a assinatura do NutriCafé."), target: "_blank", rel: "noopener noreferrer", className: "w-full mt-4 flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold" },
-                React.createElement(Icon, { name: "whatsapp", size: 17 }),
-                " Falar no WhatsApp"))));
+            React.createElement("h1", { className: "text-lg font-bold text-stone-800 text-center" }, "NutriCafé"),
+            filhos,
+            React.createElement("a", { href: linkWhatsApp("Olá! Preciso de ajuda com o acesso ao NutriCafé."), target: "_blank", rel: "noopener noreferrer", className: "w-full mt-4 flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold" },
+                React.createElement(Icon, { name: "whatsapp", size: 17 }), " Falar no WhatsApp")));
+    const msgErro = erro && React.createElement("p", { key: "er", className: "text-xs text-[#a8442f] mb-2" }, erro);
+    const msgAviso = aviso && React.createElement("p", { key: "av", className: "text-xs text-[#33422e] bg-[#e7ebdd] rounded-lg p-2 mb-2" }, aviso);
+    const btn = "w-full mt-2 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40";
+    const cartoesPlano = (aoClicar, selecionado) => PLANOS_ASSINATURA.map((p) => React.createElement("button", { key: p.id, onClick: () => aoClicar(p.id), disabled: ocupado, className: "w-full text-left rounded-xl border-2 p-3 mb-2 disabled:opacity-40 " + (selecionado === p.id || (!selecionado && p.destaque) ? "border-[#33422e] bg-[#f4f7ee]" : "border-stone-200 bg-white") },
+        React.createElement("div", { className: "flex justify-between items-center" },
+            React.createElement("span", { className: "font-bold text-stone-800" }, p.rotulo),
+            React.createElement("span", { className: "font-bold text-[#33422e]" }, p.preco)),
+        React.createElement("div", { className: "text-[11px] text-stone-500 mt-0.5" }, p.detalhe)));
+    const campoCodigo = (acao, rotuloBtn) => [
+        React.createElement("input", { key: "ci", className: inputCls + " text-center tracking-widest uppercase", placeholder: "XXXX-XXXX", value: codigo, maxLength: 9, onChange: (e) => { setCodigo(e.target.value.toUpperCase()); setErro(""); }, disabled: ocupado }),
+        msgErro,
+        React.createElement("button", { key: "cb", onClick: acao, disabled: codigo.replace(/[^A-Za-z0-9]/g, "").length < 8 || ocupado, className: btn }, ocupado ? "Verificando..." : rotuloBtn),
+    ];
+    if (etapa === "renovar") {
+        return Cartao([
+            React.createElement("p", { key: "t", className: "text-sm text-stone-600 text-center mt-1 mb-1" }, anterior && anterior.validoAte ? ("Seu acesso venceu em " + fmtDataBR(anterior.validoAte) + ".") : "Seu acesso venceu."),
+            React.createElement("p", { key: "s", className: "text-xs text-stone-500 text-center mb-3" }, "Escolha por quanto tempo quer renovar. Pagamento por PIX ou cartão, libera na hora."),
+            msgErro,
+            aguardando && React.createElement("p", { key: "ag", className: "text-xs text-[#33422e] bg-[#e7ebdd] rounded-lg p-2 mb-2 text-center" }, "Aguardando a confirmação do pagamento… assim que confirmar, o app libera sozinho."),
+            ...cartoesPlano((id) => pagar(id), "nenhum"),
+            React.createElement("button", { key: "ja", onClick: () => { setAguardando(true); validarCodigo(anterior.codigo); }, disabled: ocupado, className: "w-full border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-2.5 text-sm mt-1 disabled:opacity-40" }, ocupado ? "Verificando..." : "Já paguei — atualizar"),
+            React.createElement("button", { key: "outro", onClick: () => { try { localStorage.removeItem(ATIVACAO_STORAGE_KEY); } catch (e) { } setEtapa("ativar"); setErro(""); }, className: "w-full text-center text-xs text-[#4c6146] font-semibold mt-3 underline" }, "Usar outro código / outra conta"),
+        ]);
+    }
+    if (etapa === "aguardando") {
+        return Cartao([
+            React.createElement("p", { key: "t", className: "text-sm text-stone-600 text-center mt-1 mb-2" }, "Aguardando a confirmação do pagamento…"),
+            React.createElement("p", { key: "t2", className: "text-xs text-stone-500 text-center mb-3" }, "Assim que o Mercado Pago confirmar (PIX leva segundos), o app libera sozinho e o código vai para o seu e-mail. Se preferir, digite o código recebido:"),
+            ...campoCodigo(() => validarCodigo(codigo), "Ativar"),
+            React.createElement("button", { key: "n", onClick: () => { try { localStorage.removeItem(CHAVE_PEDIDO); } catch (e) { } setEtapa("ativar"); setErro(""); }, className: "w-full text-center text-xs text-stone-500 mt-3" }, "Voltar e escolher outro plano"),
+        ]);
+    }
+    if (etapa === "ja") {
+        return Cartao([
+            React.createElement("p", { key: "t", className: "text-sm text-stone-600 text-center mt-1 mb-3" }, "Digite o código que você recebeu por e-mail. Serve também para entrar em outro celular."),
+            ...campoCodigo(() => validarCodigo(codigo), "Entrar"),
+            React.createElement("p", { key: "p", className: "text-[11px] text-stone-500 mt-3 mb-1" }, "Perdeu o código? Digite seu e-mail e reenviamos:"),
+            React.createElement("input", { key: "e", type: "email", className: inputCls, placeholder: "seu@email.com", value: email, onChange: (e) => { setEmail(e.target.value); setAviso(""); }, disabled: ocupado }),
+            msgAviso,
+            React.createElement("button", { key: "r", onClick: () => reenviar(email), disabled: !email.trim() || ocupado, className: "w-full mt-2 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-2.5 text-sm disabled:opacity-40" }, "Reenviar código"),
+            React.createElement("button", { key: "v", onClick: () => { setEtapa("ativar"); setErro(""); setAviso(""); }, className: "w-full text-center text-xs text-stone-500 mt-3" }, "Voltar"),
+        ]);
+    }
+    const okForm = nome.trim().length >= 3 && email.trim() && email2.trim();
+    return Cartao([
+        React.createElement("p", { key: "t", className: "text-sm text-stone-500 text-center mt-1 mb-4" }, "Ative seu acesso: informe seus dados, escolha o plano e pague. O código de ativação chega no seu e-mail."),
+        React.createElement(Field, { key: "n", label: "Seu nome" },
+            React.createElement("input", { className: inputCls, placeholder: "Nome completo", value: nome, onChange: (e) => setNome(e.target.value), disabled: ocupado })),
+        React.createElement(Field, { key: "e", label: "Seu e-mail" },
+            React.createElement("input", { type: "email", className: inputCls, placeholder: "seu@email.com", value: email, onChange: (e) => setEmail(e.target.value), disabled: ocupado })),
+        React.createElement(Field, { key: "e2", label: "Repita o e-mail" },
+            React.createElement("input", { type: "email", className: inputCls, placeholder: "seu@email.com", value: email2, onChange: (e) => setEmail2(e.target.value), disabled: ocupado })),
+        React.createElement("p", { key: "pl", className: "text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2 mt-1" }, "Plano"),
+        ...cartoesPlano((id) => setPlano(id), plano),
+        msgErro,
+        React.createElement("button", { key: "b", onClick: comprar, disabled: !okForm || ocupado, className: btn }, ocupado ? "Abrindo pagamento..." : "Pagar e ativar"),
+        React.createElement("p", { key: "p", className: "text-[11px] text-stone-400 text-center mt-2" }, "Pagamento por PIX ou cartão pelo Mercado Pago. Sem cobrança automática: você só paga quando quiser renovar."),
+        React.createElement("button", { key: "j", onClick: () => { setEtapa("ja"); setErro(""); }, className: "w-full text-center text-xs text-[#4c6146] font-semibold mt-4 underline" }, "Já tenho um código"),
+    ]);
 }
 async function loadList(key) {
     try {
@@ -5044,10 +5058,11 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
             ["Modera\u00E7\u00E3o", "\u00C9 um espa\u00E7o aberto entre assinantes \u2014 evite compartilhar dados sens\u00EDveis (senha, dados de pagamento) por l\u00E1. Mensagens impr\u00F3prias podem ser removidas."],
         ] },
         { id: "assinatura", titulo: "Assinatura", itens: [
-            ["30 dias gr\u00E1tis", "Ao assinar, voc\u00EA tem 30 dias pra usar o app sem nenhuma cobran\u00E7a. O cart\u00E3o \u00E9 cadastrado direto na p\u00E1gina segura do Mercado Pago \u2014 o NutriCaf\u00E9 nunca v\u00EA nem guarda o n\u00FAmero do seu cart\u00E3o."],
-            ["Depois do per\u00EDodo gr\u00E1tis", "A cobran\u00E7a de R$ 9,99 passa a ser feita automaticamente todo m\u00EAs, no cart\u00E3o cadastrado, sem precisar fazer nada. D\u00E1 pra cancelar quando quiser, direto pelo Mercado Pago."],
-            ["Troquei de celular / limpei os dados \u2014 perdi o acesso?", "Na tela de assinatura, toque em \"J\u00E1 \u00E9 assinante? Recuperar acesso\" e digite o mesmo e-mail usado na assinatura original. O app reconecta seu acesso na hora, sem precisar assinar de novo nem passar pelo Mercado Pago outra vez."],
-            ["Problema com o cart\u00E3o ou pagamento por fora", "Se o cart\u00E3o n\u00E3o for aprovado, ou se combinou o pagamento de outro jeito (PIX, por exemplo), entre em contato pelo e-mail de suporte \u2014 o acesso pode ser liberado manualmente enquanto isso se resolve."],
+            ["Como ativar", "Ao abrir o app pela primeira vez, informe seu nome e e-mail (duas vezes, pra garantir que está certo), escolha o plano e pague por PIX ou cartão pelo Mercado Pago. Assim que o pagamento confirma, o app libera sozinho e você recebe por e-mail um código de ativação (ex.: K7QM-4TXA). Guarde esse e-mail."],
+            ["Planos", "1 mês: R$ 9,90 • 6 meses: R$ 55,00 • 1 ano: R$ 100,00. Não há cobrança automática: nada é cobrado sozinho no seu cartão, você só paga quando quiser renovar."],
+            ["Quando vencer", "O app trava e mostra a tela de renovação: escolha o período e pague. Se renovar antes de vencer, os dias que sobraram são somados. Em {{Configurações|configuracoes}} dá pra ver seu código, o vencimento e renovar; o app também avisa na tela inicial quando faltam 5 dias ou menos."],
+            ["Troquei de celular / perdi o acesso", "Na primeira tela toque em \"Já tenho um código\" e digite o código do e-mail. Se perdeu o e-mail, digite seu e-mail ali mesmo e toque em \"Reenviar código\"."],
+            ["Problema com o pagamento", "Se pagou e o app não liberou, toque em \"Já paguei — atualizar\". Se continuar, fale pelo WhatsApp: o acesso pode ser liberado manualmente."],
         ] },
         { id: "dados", titulo: "Seus dados e backup", itens: [
             ["Salvamento", "Tudo \u00E9 salvo sozinho no celular, sem bot\u00E3o de salvar \u2014 assim que voc\u00EA confirma um cadastro, j\u00E1 fica gravado."],
@@ -5112,32 +5127,24 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
     const [tabelaParaExcluir, setTabelaParaExcluir] = useState(null);
     const [secaoAberta, setSecaoAberta] = useState("assinatura");
     const alternarSecao = (id) => setSecaoAberta((atual) => (atual === id ? null : id));
-    const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(false);
-    const [cancelando, setCancelando] = useState(false);
-    const [erroCancelamento, setErroCancelamento] = useState("");
-    const cancelarAssinatura = async () => {
-        setCancelando(true);
-        setErroCancelamento("");
+    const [erroPag, setErroPag] = useState("");
+    const [pagando, setPagando] = useState(false);
+    // atualiza a validade com o servidor ao abrir (mostra renovação recente)
+    const [, forcar] = useState(0);
+    useEffect(() => {
+        const a = lerAtivacao();
+        if (!a || !a.codigo) return;
+        consultarStatusAssinatura(a.codigo).then((info) => { if (info.ok) { guardarAtivacaoDoServidor(info); forcar((n) => n + 1); } });
+    }, []);
+    const pagarRenovacao = async (plano) => {
+        setErroPag(""); setPagando(true);
         try {
-            const res = await fetch("/.netlify/functions/cancelar-assinatura", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ clienteId: getClienteId() }),
-            });
-            const dados = await res.json();
-            if (!res.ok || !dados.ok) {
-                setErroCancelamento(dados.erro || "Não consegui cancelar agora. Tente de novo em instantes, ou fale no WhatsApp.");
-                setCancelando(false);
-                return;
-            }
-            salvarAtivacao({ ...(ativacao || {}), status: "cancelled" });
-            setConfirmandoCancelamento(false);
-            setCancelando(false);
-            window.location.reload();
-        } catch (e) {
-            setErroCancelamento("Não foi possível conectar agora. Confira sua internet e tente de novo.");
-            setCancelando(false);
-        }
+            const res = await fetch("/.netlify/functions/criar-pagamento", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codigo: ativacao.codigo, plano }) });
+            const d = await res.json();
+            if (!res.ok || !d.url) { setErroPag(d.erro || "Não consegui abrir o pagamento."); setPagando(false); return; }
+            try { localStorage.setItem(STORAGE_PREFIX + "aguardando_pagamento", String(Date.now())); } catch (e) { }
+            window.location.href = d.url;
+        } catch (e) { setErroPag("Sem conexão com a internet. Tente de novo."); setPagando(false); }
     };
     const escolherArquivo = () => fileInputRef.current && fileInputRef.current.click();
     const lerArquivoEscolhido = (e) => {
@@ -5190,7 +5197,7 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
         React.createElement("div", { className: "px-4 mt-4 space-y-3" },
             React.createElement(SecaoColapsavel, { titulo: "Assinatura", aberta: secaoAberta === "assinatura", onToggle: () => alternarSecao("assinatura") },
             ativacao ? (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm overflow-hidden" },
-                React.createElement("div", { className: "px-4 py-2.5 text-xs font-semibold uppercase tracking-wide " + (valido ? "bg-[#e7ebdd] text-[#33422e]" : "bg-red-50 text-red-700") }, valido ? "Assinatura ativa" : ativacao.status === "pending" ? "Aguardando confirma\u00E7\u00E3o" : "Assinatura inativa"),
+                React.createElement("div", { className: "px-4 py-2.5 text-xs font-semibold uppercase tracking-wide " + (valido ? "bg-[#e7ebdd] text-[#33422e]" : "bg-red-50 text-red-700") }, valido ? (ativacao.trial ? "Teste grátis ativo" : "Assinatura ativa") : "Acesso vencido"),
                 React.createElement("div", { className: "px-4 py-2" },
                     ativacao.nome && React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100" },
                         React.createElement("span", { className: "text-stone-500 text-sm" }, "Nome"),
@@ -5198,32 +5205,24 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                     ativacao.email && React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100" },
                         React.createElement("span", { className: "text-stone-500 text-sm" }, "E-mail"),
                         React.createElement("span", { className: "font-semibold text-stone-800 truncate ml-2" }, ativacao.email)),
-                    ativacao.ativadoEm && React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100" },
-                        React.createElement("span", { className: "text-stone-500 text-sm" }, "Assinante desde"),
-                        React.createElement("span", { className: "font-semibold text-stone-800" }, new Date(ativacao.ativadoEm).toLocaleDateString("pt-BR"))),
-                    ativacao.proximaCobranca ? React.createElement("div", { className: "flex items-center justify-between py-2" },
-                        React.createElement("span", { className: "text-stone-500 text-sm" }, "Pr\u00F3xima cobran\u00E7a"),
-                        React.createElement("span", { className: "font-semibold text-stone-800" }, new Date(ativacao.proximaCobranca).toLocaleDateString("pt-BR")))
-                        : ativacao.validoAte ? React.createElement("div", { className: "flex items-center justify-between py-2" },
-                            React.createElement("span", { className: "text-stone-500 text-sm" }, "Acesso liberado at\u00E9"),
-                            React.createElement("span", { className: "font-semibold text-stone-800" }, new Date(ativacao.validoAte).toLocaleDateString("pt-BR")))
-                        : null),
-                ativacao.liberadoManualmente
-                    ? React.createElement("p", { className: "text-[11px] text-stone-400 px-4 pb-3" }, "Seu acesso foi liberado manualmente pelo suporte \u2014 n\u00E3o h\u00E1 cobran\u00E7a recorrente nem cart\u00E3o envolvido. Se quiser encerrar antes da data acima, fale com o suporte.")
-                    : React.createElement("p", { className: "text-[11px] text-stone-400 px-4 pb-3" }, "R$ 9,99/m\u00EAs \u2014 cobrado automaticamente pelo Mercado Pago.")))
-                : (React.createElement("p", { className: "text-center text-stone-400 text-sm py-4" }, "Nenhuma informa\u00E7\u00E3o de assinatura encontrada.")),
-            valido && !ativacao.liberadoManualmente && (
-                !confirmandoCancelamento ? (
-                    React.createElement("button", { onClick: () => setConfirmandoCancelamento(true), className: "w-full text-center text-xs text-[#a8442f] font-semibold mt-3 underline" }, "Cancelar assinatura")
-                ) : (
-                    React.createElement("div", { className: "bg-[#fdf0e6] border border-[#f0d5c4] rounded-lg p-3 mt-3" },
-                        React.createElement("p", { className: "text-xs text-[#8a3a29] mb-2" }, "Tem certeza? Voc\u00EA perde o acesso ao app assim que cancelar, e a cobran\u00E7a do Mercado Pago para na hora \u2014 n\u00E3o precisa fazer mais nada l\u00E1."),
-                        erroCancelamento && React.createElement("p", { className: "text-xs text-[#a8442f] mb-2 font-semibold" }, erroCancelamento),
-                        React.createElement("div", { className: "flex gap-2" },
-                            React.createElement("button", { onClick: () => setConfirmandoCancelamento(false), disabled: cancelando, className: "flex-1 border border-stone-300 text-stone-600 font-semibold rounded-lg py-2 text-sm" }, "Voltar"),
-                            React.createElement("button", { onClick: cancelarAssinatura, disabled: cancelando, className: "flex-1 bg-[#a8442f] text-white font-semibold rounded-lg py-2 text-sm disabled:opacity-40" }, cancelando ? "Cancelando..." : "Sim, cancelar")))
-                )),
-            React.createElement("a", { href: linkWhatsApp(valido ? "Olá! Gostaria de tirar uma dúvida sobre minha assinatura do NutriCafé." : "Olá! Minha assinatura do NutriCafé não está ativa e preciso de ajuda."), target: "_blank", rel: "noopener noreferrer", className: "w-full flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold mt-3" },
+                    ativacao.codigo && React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100" },
+                        React.createElement("span", { className: "text-stone-500 text-sm" }, "Código"),
+                        React.createElement("span", { className: "font-semibold text-stone-800 tracking-widest" }, ativacao.codigo)),
+                    ativacao.validoAte && React.createElement("div", { className: "flex items-center justify-between py-2" },
+                        React.createElement("span", { className: "text-stone-500 text-sm" }, valido ? "Acesso liberado até" : "Venceu em"),
+                        React.createElement("span", { className: "font-semibold text-stone-800" }, fmtDataBR(ativacao.validoAte)))),
+                React.createElement("p", { className: "text-[11px] text-stone-400 px-4 pb-3" }, "Sem cobrança automática: você paga só quando quiser renovar. Os dias que sobraram são somados à renovação.")))
+                : (React.createElement("p", { className: "text-center text-stone-400 text-sm py-4" }, "Nenhuma informação de assinatura encontrada.")),
+            ativacao && ativacao.codigo && React.createElement("div", { className: "mt-3" },
+                React.createElement("p", { className: "text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2" }, "Renovar acesso"),
+                erroPag && React.createElement("p", { className: "text-xs text-[#a8442f] mb-2" }, erroPag),
+                ...PLANOS_ASSINATURA.map((pl) => React.createElement("button", { key: pl.id, onClick: () => pagarRenovacao(pl.id), disabled: pagando, className: "w-full text-left rounded-xl border-2 p-3 mb-2 disabled:opacity-40 " + (pl.destaque ? "border-[#33422e] bg-[#f4f7ee]" : "border-stone-200 bg-white") },
+                    React.createElement("div", { className: "flex justify-between items-center" },
+                        React.createElement("span", { className: "font-bold text-stone-800" }, pl.rotulo),
+                        React.createElement("span", { className: "font-bold text-[#33422e]" }, pl.preco)),
+                    React.createElement("div", { className: "text-[11px] text-stone-500 mt-0.5" }, pl.detalhe))),
+                React.createElement("p", { className: "text-[11px] text-stone-400" }, "Pagamento por PIX ou cartão pelo Mercado Pago. O acesso é liberado automaticamente.")),
+            React.createElement("a", { href: linkWhatsApp(valido ? "Olá! Gostaria de tirar uma dúvida sobre minha assinatura do NutriCafé." : "Olá! Meu acesso ao NutriCafé venceu e preciso de ajuda."), target: "_blank", rel: "noopener noreferrer", className: "w-full flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold mt-3" },
                 React.createElement(Icon, { name: "whatsapp", size: 17 }),
                 " ",
                 valido ? "Falar no WhatsApp" : "Preciso de ajuda no WhatsApp")),
@@ -5822,6 +5821,8 @@ function suporteSolicitado() {
     } catch (e) { return false; }
 }
 function TelaLiberarAssinatura({ onBack }) {
+    const [modo, setModo] = useState("liberar");
+    const [busca, setBusca] = useState("");
     const [nome, setNome] = useState("");
     const [email, setEmail] = useState("");
     const [meses, setMeses] = useState(1);
@@ -5829,67 +5830,89 @@ function TelaLiberarAssinatura({ onBack }) {
     const [erro, setErro] = useState("");
     const [opcoes, setOpcoes] = useState(null);
     const [sucesso, setSucesso] = useState(null);
-
-    const liberar = async () => {
-        if (!nome.trim()) return;
-        setEnviando(true);
-        setErro("");
-        setOpcoes(null);
-        setSucesso(null);
+    const [lista, setLista] = useState(null);
+    const chamar = async (corpo) => {
+        const res = await fetch("/.netlify/functions/liberar-manual", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(Object.assign({ senha: SUPORTE_SENHA }, corpo)),
+        });
+        return { res, dados: await res.json() };
+    };
+    const executar = async () => {
+        setEnviando(true); setErro(""); setOpcoes(null); setSucesso(null);
         try {
-            const res = await fetch("/.netlify/functions/liberar-manual", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ senha: SUPORTE_SENHA, nome: nome.trim(), email: email.trim(), meses }),
-            });
-            const dados = await res.json();
+            const corpo = modo === "criar" ? { acao: "criar", nome: nome.trim(), email: email.trim(), meses } : { busca: busca.trim(), meses };
+            const { res, dados } = await chamar(corpo);
             if (!res.ok) {
-                setErro(dados.erro || "Não consegui liberar agora.");
+                setErro(dados.erro || "Não consegui agora.");
                 if (dados.opcoes) setOpcoes(dados.opcoes);
-                setEnviando(false);
-                return;
-            }
-            setSucesso(dados);
-        } catch (e) {
-            setErro("Não foi possível conectar agora. Tente de novo.");
-        }
+            } else setSucesso(dados);
+        } catch (e) { setErro("Não foi possível conectar agora. Tente de novo."); }
         setEnviando(false);
     };
-
-    return React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6" },
+    const carregarLista = async () => {
+        setEnviando(true); setErro("");
+        try {
+            const { res, dados } = await chamar({ acao: "listar" });
+            if (!res.ok) setErro(dados.erro || "Não consegui carregar."); else setLista(dados.clientes);
+        } catch (e) { setErro("Não foi possível conectar agora."); }
+        setEnviando(false);
+    };
+    useEffect(() => { if (modo === "lista" && !lista) carregarLista(); }, [modo]);
+    const aba = (id, rotulo) => React.createElement("button", { key: id, onClick: () => { setModo(id); setErro(""); setSucesso(null); setOpcoes(null); }, className: "flex-1 text-xs font-semibold py-2 rounded-lg " + (modo === id ? "bg-[#33422e] text-white" : "bg-stone-100 text-stone-600") }, rotulo);
+    const seletorMeses = React.createElement("div", { key: "m" },
+        React.createElement("label", { className: "text-xs font-semibold text-stone-500" }, "QUANTOS MESES"),
+        React.createElement("div", { className: "flex items-center gap-3 mt-1 mb-4" },
+            React.createElement("button", { onClick: () => setMeses(Math.max(1, meses - 1)), className: "w-10 h-10 rounded-lg border border-stone-300 text-lg font-bold text-stone-700" }, "−"),
+            React.createElement("span", { className: "flex-1 text-center text-lg font-bold text-stone-800" }, meses + (meses === 1 ? " mês" : " meses")),
+            React.createElement("button", { onClick: () => setMeses(meses + 1), className: "w-10 h-10 rounded-lg border border-stone-300 text-lg font-bold text-stone-700" }, "+")));
+    let corpo;
+    if (sucesso) {
+        corpo = React.createElement("div", { className: "bg-[#e7ebdd] rounded-lg p-4" },
+            React.createElement("p", { className: "text-sm font-semibold text-[#33422e]" }, sucesso.criado ? "✅ Acesso criado! O código foi enviado ao e-mail." : "✅ Liberado com sucesso!"),
+            React.createElement("p", { className: "text-xs text-stone-600 mt-1" }, sucesso.nome + (sucesso.email ? " — " + sucesso.email : "")),
+            React.createElement("p", { className: "text-xs text-stone-600 mt-1" }, "Válido até " + sucesso.vencimento + (sucesso.codigo ? " • Código " + sucesso.codigo : "")),
+            React.createElement("button", { onClick: () => { setSucesso(null); setBusca(""); setNome(""); setEmail(""); setLista(null); }, className: "w-full mt-4 bg-[#33422e] text-white font-semibold rounded-lg py-2.5" }, "Fazer outro"));
+    } else if (modo === "lista") {
+        corpo = React.createElement("div", null,
+            erro ? React.createElement("p", { className: "text-xs text-[#a8442f] mb-3" }, erro) : null,
+            enviando && !lista ? React.createElement("p", { className: "text-sm text-stone-500" }, "Carregando...") : null,
+            lista && lista.length === 0 ? React.createElement("p", { className: "text-sm text-stone-500" }, "Nenhum cliente ainda.") : null,
+            lista ? lista.map((c, i) => React.createElement("div", { key: i, className: "border-b border-stone-100 py-2" },
+                React.createElement("p", { className: "text-sm font-semibold text-stone-800" }, c.nome),
+                React.createElement("p", { className: "text-xs text-stone-500" }, c.email),
+                React.createElement("p", { className: "text-xs " + (c.ativo ? "text-[#33422e]" : "text-[#a8442f]") }, c.codigo + " • " + (c.ativo ? "até " : "venceu em ") + c.vencimento))) : null,
+            React.createElement("button", { onClick: carregarLista, disabled: enviando, className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-2.5 text-sm disabled:opacity-40" }, "Atualizar lista"));
+    } else if (modo === "criar") {
+        corpo = React.createElement(React.Fragment, null,
+            React.createElement("p", { className: "text-xs text-stone-500 mb-3" }, "Cria o acesso sem pagamento (para você ou para alguém que pagou por fora). O código vai por e-mail. Se o e-mail já existe, soma os meses."),
+            React.createElement("label", { className: "text-xs font-semibold text-stone-500" }, "NOME COMPLETO"),
+            React.createElement("input", { className: inputCls + " mt-1 mb-3", value: nome, onChange: (e) => { setNome(e.target.value); setErro(""); } }),
+            React.createElement("label", { className: "text-xs font-semibold text-stone-500" }, "E-MAIL"),
+            React.createElement("input", { type: "email", className: inputCls + " mt-1 mb-4", value: email, onChange: (e) => { setEmail(e.target.value); setErro(""); } }),
+            seletorMeses,
+            erro ? React.createElement("p", { className: "text-xs text-[#a8442f] mb-3" }, erro) : null,
+            React.createElement("button", { onClick: executar, disabled: nome.trim().length < 3 || !email.trim() || enviando, className: "w-full bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, enviando ? "Criando..." : "Criar acesso"));
+    } else {
+        corpo = React.createElement(React.Fragment, null,
+            React.createElement("p", { className: "text-xs text-stone-500 mb-3" }, "Soma meses ao acesso de um cliente que já existe (pagou por fora ou compensação)."),
+            React.createElement("label", { className: "text-xs font-semibold text-stone-500" }, "CÓDIGO, E-MAIL OU NOME"),
+            React.createElement("input", { className: inputCls + (opcoes ? " mt-1 mb-1 border-[#a8442f] ring-1 ring-[#a8442f]" : " mt-1 mb-4"), placeholder: "Ex: K7QM-4TXA ou cliente@gmail.com", value: busca, onChange: (e) => { setBusca(e.target.value); setErro(""); setOpcoes(null); } }),
+            opcoes ? React.createElement("p", { className: "text-[11px] text-stone-400 mb-3" }, "Copie o código certo da lista e cole acima.") : null,
+            seletorMeses,
+            erro ? React.createElement("p", { className: "text-xs text-[#a8442f] mb-3" }, erro) : null,
+            opcoes ? React.createElement("div", { className: "mb-3" }, opcoes.map((o, i) => React.createElement("p", { key: i, className: "text-xs text-stone-600" }, "• " + o.nome + " — " + o.email + " — " + o.codigo))) : null,
+            React.createElement("button", { onClick: executar, disabled: busca.trim().length < 3 || enviando, className: "w-full bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, enviando ? "Liberando..." : "Liberar acesso"));
+    }
+    return React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6 py-8" },
         React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl border border-stone-200 p-6" },
-            React.createElement("button", { onClick: onBack, className: "text-xs text-stone-500 font-semibold mb-3" }, "\u2190 voltar"),
-            React.createElement("h1", { className: "text-lg font-bold text-stone-800 mb-1" }, "\ud83d\udd13 Liberar assinatura manualmente"),
-            React.createElement("p", { className: "text-sm text-stone-500 mb-4" }, "Pra quando o cliente paga por fora (PIX, dinheiro etc). Ele precisa ter aberto a tela de assinatura no app pelo menos uma vez."),
-            sucesso ? (
-                React.createElement("div", { className: "bg-[#e7ebdd] rounded-lg p-4" },
-                    React.createElement("p", { className: "text-sm font-semibold text-[#33422e]" }, "\u2705 Liberado com sucesso!"),
-                    React.createElement("p", { className: "text-xs text-stone-600 mt-1" }, sucesso.nome + (sucesso.email ? " — " + sucesso.email : "")),
-                    React.createElement("p", { className: "text-xs text-stone-600 mt-1" }, "Válido até " + new Date(sucesso.validoAte).toLocaleDateString("pt-BR")),
-                    React.createElement("button", { onClick: () => { setSucesso(null); setNome(""); setEmail(""); }, className: "w-full mt-4 bg-[#33422e] text-white font-semibold rounded-lg py-2.5" }, "Liberar outro cliente")
-                )
-            ) : (
-                React.createElement(React.Fragment, null,
-                    React.createElement("label", { className: "text-xs font-semibold text-stone-500" }, "NOME DO CLIENTE (como ele digitou no app)"),
-                    React.createElement("input", { className: inputCls + " mt-1 mb-4", placeholder: "Ex: Grace Kelly Souza", value: nome, onChange: function (e) { setNome(e.target.value); setErro(""); setOpcoes(null); } }),
-                    React.createElement("label", { className: "text-xs font-semibold text-stone-500" }, "E-MAIL (opcional \u2014 use se tiver mais de um cliente com nome parecido)"),
-                    React.createElement("input", { className: inputCls + (opcoes ? " mt-1 mb-1 border-[#a8442f] ring-1 ring-[#a8442f]" : " mt-1 mb-4"), placeholder: "Ex: cliente@gmail.com", value: email, onChange: function (e) { setEmail(e.target.value); setErro(""); } }),
-                    opcoes ? React.createElement("p", { className: "text-[11px] text-stone-400 mb-4" }, "Copie o e-mail certo da lista abaixo e cole aqui.") : null,
-                    React.createElement("label", { className: "text-xs font-semibold text-stone-500" }, "QUANTOS MESES LIBERAR"),
-                    React.createElement("div", { className: "flex items-center gap-3 mt-1 mb-4" },
-                        React.createElement("button", { onClick: () => setMeses(Math.max(1, meses - 1)), className: "w-10 h-10 rounded-lg border border-stone-300 text-lg font-bold text-stone-700" }, "\u2212"),
-                        React.createElement("span", { className: "flex-1 text-center text-lg font-bold text-stone-800" }, meses + (meses === 1 ? " mês" : " meses")),
-                        React.createElement("button", { onClick: () => setMeses(meses + 1), className: "w-10 h-10 rounded-lg border border-stone-300 text-lg font-bold text-stone-700" }, "+")),
-                    erro ? React.createElement("p", { className: "text-xs text-[#a8442f] mb-3" }, erro) : null,
-                    opcoes ? React.createElement("div", { className: "mb-3" },
-                        opcoes.map((o, i) => React.createElement("p", { key: i, className: "text-xs text-stone-600" }, "• " + o.nome + (o.email ? " — " + o.email : "")))
-                    ) : null,
-                    React.createElement("button", { onClick: liberar, disabled: !nome.trim() || enviando, className: "w-full bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, enviando ? "Liberando..." : "Liberar acesso")
-                )
-            )
-        )
-    );
+            React.createElement("button", { onClick: onBack, className: "text-xs text-stone-500 font-semibold mb-3" }, "← voltar"),
+            React.createElement("h1", { className: "text-lg font-bold text-stone-800 mb-3" }, "🔓 Acessos e assinaturas"),
+            React.createElement("div", { className: "flex gap-2 mb-4" }, aba("liberar", "Liberar"), aba("criar", "Criar acesso"), aba("lista", "Clientes")),
+            corpo));
 }
+
 function TelaSuporte() {
     const [syncId, setSyncId] = useState("");
     const [carregando, setCarregando] = useState(false);
@@ -5965,7 +5988,7 @@ function TelaSuporte() {
                 React.createElement("input", { className: inputCls, placeholder: "Ex: sitio-vlt3ys", value: syncId, onChange: function (e) { setSyncId(e.target.value); setErro(""); }, onKeyDown: function (e) { if (e.key === "Enter") carregar(); } }),
                 erro ? React.createElement("p", { className: "text-xs text-[#a8442f] mt-2" }, erro) : null,
                 React.createElement("button", { onClick: carregar, disabled: !syncId.trim() || carregando, className: "w-full mt-4 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, carregando ? "Carregando..." : "Carregar dados"),
-                React.createElement("button", { onClick: () => setShowLiberar(true), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "\ud83d\udd13 Liberar assinatura manualmente"),
+                React.createElement("button", { onClick: () => setShowLiberar(true), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "\ud83d\udd13 Acessos e assinaturas"),
                 React.createElement("button", { onClick: () => setShowModerarChat(true), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "\ud83d\udcac Moderar comunidade (chat)")
             )
         );
@@ -6194,28 +6217,38 @@ function TelaComunidade({ onBack, meuNome, souAdmin }) {
             React.createElement("button", { onClick: enviar, disabled: enviando || (!texto.trim() && !anexo), className: "bg-[#33422e] text-white rounded-full p-2.5 shrink-0 disabled:opacity-40" }, React.createElement(Icon, { name: "send", size: 16 }))));
 }
 
+// Aviso discreto na tela inicial quando faltam 5 dias ou menos pro acesso vencer.
+function BannerVencimento(abrirConfig) {
+    const a = lerAtivacao();
+    if (!a || !a.validoAte) return null;
+    const dias = Math.ceil((Number(a.validoAte) - Date.now()) / 86400000);
+    if (dias > 5 || dias < 1) return null;
+    return React.createElement("button", { onClick: abrirConfig, className: "w-full bg-amber-50 text-amber-800 text-xs font-semibold py-2 px-4 text-center border-b border-amber-200" },
+        "Seu acesso vence " + (dias === 1 ? "amanh\u00E3" : "em " + dias + " dias") + " (" + fmtDataBR(a.validoAte) + "). Toque para renovar.");
+}
 function App() {
     const [ativado, setAtivado] = useState(ativacaoValida());
     useEffect(() => {
         if (!ativado)
             return;
-        const CHAVE_ULTIMA_CONFERENCIA = STORAGE_PREFIX + "assinatura_conferida_em";
-        const ultima = localStorage.getItem(CHAVE_ULTIMA_CONFERENCIA);
-        const passouUmDia = !ultima || (Date.now() - Number(ultima)) > 24 * 60 * 60 * 1000;
-        if (!passouUmDia)
-            return;
-        const registro = lerAtivacao();
-        if (!registro || !registro.clienteId)
-            return;
-        verificarStatusAssinaturaNaNuvem(registro.clienteId).then((info) => {
-            localStorage.setItem(CHAVE_ULTIMA_CONFERENCIA, String(Date.now()));
-            if (info && info.status) {
-                salvarAtivacao({ ...registro, status: info.status, validoAte: info.validoAte || null, proximaCobranca: info.proximaCobranca || null, liberadoManualmente: !!info.liberadoManualmente });
-                const expirou = info.validoAte && new Date(info.validoAte) < new Date();
-                if (info.status !== "authorized" || expirou)
-                    setAtivado(false);
-            }
-        });
+        // Confere com o servidor ao abrir e depois a cada hora (pega renovações e liberações).
+        // Sem internet: segue valendo a última validade confirmada.
+        const conferir = () => {
+            const registro = lerAtivacao();
+            if (!registro || !registro.codigo) { setAtivado(false); return; }
+            consultarStatusAssinatura(registro.codigo).then((info) => {
+                if (info.ok) {
+                    guardarAtivacaoDoServidor(info);
+                    if (!info.ativo) setAtivado(false);
+                }
+                else if (info.naoEncontrado) { setAtivado(false); }
+            });
+        };
+        conferir();
+        const t1 = setInterval(conferir, 60 * 60 * 1000);
+        // trava na hora quando a validade passa com o app aberto
+        const t2 = setInterval(() => { if (!ativacaoValida()) setAtivado(false); }, 30 * 1000);
+        return () => { clearInterval(t1); clearInterval(t2); };
     }, [ativado]);
     const [talhoes, setTalhoes] = useState([]);
     const [analises, setAnalises] = useState({});
@@ -6533,7 +6566,7 @@ function App() {
             onAbrirCalculadoras: () => { setShowAjuda(false); setShowCalculadoras(true); },
             onAbrirCalendario: () => { setShowAjuda(false); setShowCalendario(true); },
             onAbrirConfiguracoes: () => { setShowAjuda(false); setShowConfiguracoes(true); },
-        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, adubacoes: adubacoes, defensivos: defensivos, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showComunidade ? (React.createElement(TelaComunidade, { onBack: () => setShowComunidade(false), meuNome: meuNomeComunidade, souAdmin: false })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], agendamentos: agendamentos[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" },
+        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, adubacoes: adubacoes, defensivos: defensivos, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showComunidade ? (React.createElement(TelaComunidade, { onBack: () => setShowComunidade(false), meuNome: meuNomeComunidade, souAdmin: false })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], agendamentos: agendamentos[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" }, BannerVencimento(() => setShowConfiguracoes(true)),
             React.createElement("div", { className: "bg-gradient-to-br from-[#3d4f36] to-[#242e1f] text-white px-4 pt-6 pb-6 rounded-b-3xl shadow-lg" },
                 React.createElement("div", { className: "flex items-center justify-between" },
                     React.createElement("div", { className: "flex items-center gap-2" },
