@@ -1,191 +1,66 @@
-// netlify/functions/liberar-manual.js
-//
-// Uso interno (chamado pelo painel de suporte do próprio app). Recebe
-// { senha, nome, meses }, procura na nuvem um cliente cujo nome bate com
-// o texto digitado e marca a assinatura dele como "authorized" por esse
-// número de meses — sem precisar de cartão nem do Mercado Pago. Serve
-// pra casos de PIX combinado por fora, ou pra compensar algum problema
-// de cobrança.
-//
-// A senha é a MESMA senha do painel de suporte (SUPORTE_SENHA lá no
-// index.html). Se trocar uma, troque a outra também.
-
-const SENHA_ADMIN = "cafe-suporte-2026";
-
-// Marca de versão: abrir o endereço da função no navegador mostra este texto,
-// o que prova que o Netlify publicou esta versão e não a antiga.
-const VERSAO = "v2-duplicatas-2026-10-09";
-
-const FIREBASE_PROJECT_ID = "backup-bb0d9";
-const FIRESTORE_COLECAO = "nutricafe_dados";
-
-function baseUrl() {
-    return "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
-        "/databases/(default)/documents/" + FIRESTORE_COLECAO;
-}
-
-const crypto = require("crypto");
-function base64url(input) {
-    return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-// Gera um token de acesso "de servidor" a partir da chave de serviço do
-// Firebase (variável de ambiente FIREBASE_SERVICE_ACCOUNT). Esse token
-// ignora as regras de segurança do Firestore — só o servidor consegue
-// gerar ele, porque só o servidor tem a chave privada.
-async function obterTokenAdmin() {
-    const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    const agora = Math.floor(Date.now() / 1000);
-    const header = { alg: "RS256", typ: "JWT" };
-    const claim = {
-        iss: sa.client_email,
-        scope: "https://www.googleapis.com/auth/datastore",
-        aud: "https://oauth2.googleapis.com/token",
-        exp: agora + 3600,
-        iat: agora,
-    };
-    const semAssinar = base64url(JSON.stringify(header)) + "." + base64url(JSON.stringify(claim));
-    const assinador = crypto.createSign("RSA-SHA256");
-    assinador.update(semAssinar);
-    assinador.end();
-    const assinatura = assinador.sign(sa.private_key).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    const jwt = semAssinar + "." + assinatura;
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=" + encodeURIComponent(jwt),
-    });
-    const dados = await res.json();
-    if (!dados.access_token) throw new Error("Não consegui autenticar com o Firebase (admin).");
-    return dados.access_token;
-}
-
-function normalizar(txt) {
-    return (txt || "")
-        .toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove acentos
-        .trim();
-}
-
-async function listarRegistrosDeAssinatura() {
-    const registros = [];
-    let pageToken = null;
-    do {
-        const url = baseUrl() + "?pageSize=300" + (pageToken ? "&pageToken=" + pageToken : "");
-        const res = await fetch(url);
-        const json = await res.json();
-        for (const doc of json.documents || []) {
-            const nomeDoc = doc.name.split("/").pop();
-            if (nomeDoc.indexOf("assinatura--") !== 0) continue;
-            const f = doc.fields || {};
-            registros.push({
-                docId: nomeDoc,
-                clienteId: nomeDoc.replace(/^assinatura--/, ""),
-                nome: f.nome ? f.nome.stringValue : "",
-                email: f.email ? f.email.stringValue : "",
-                status: f.status ? f.status.stringValue : "",
-            });
-        }
-        pageToken = json.nextPageToken || null;
-    } while (pageToken);
-    return registros;
-}
+// netlify/functions/liberar-manual.js  (v3 - novo modelo por código)
+// Uso interno (painel de suporte do app). { senha, busca, meses }
+// acao:"listar" lista clientes; acao:"criar" cria acesso manual (nome+email+meses).
+// "busca" pode ser código, e-mail ou parte do nome. Soma N meses.
+const L = require("./lib/firestore");
+const VERSAO = "v4-pago-desde-inicio-2026-10-10";
 
 exports.handler = async (event) => {
-    if (event.httpMethod !== "POST") {
-        return { statusCode: 405, body: JSON.stringify({ erro: "Método não permitido", versao: VERSAO }) };
-    }
-
-    let corpo;
+    if (event.httpMethod === "OPTIONS") return L.resp(200, {});
+    if (event.httpMethod !== "POST") return L.resp(405, { erro: "Use POST.", versao: VERSAO });
     try {
-        corpo = JSON.parse(event.body || "{}");
-    } catch (e) {
-        return { statusCode: 400, body: JSON.stringify({ erro: "Corpo da requisição inválido." }) };
-    }
-
-    const { senha, nome, email, meses } = corpo;
-    if (senha !== SENHA_ADMIN) {
-        return { statusCode: 401, body: JSON.stringify({ erro: "Senha incorreta." }) };
-    }
-    if (!nome || !nome.trim()) {
-        return { statusCode: 400, body: JSON.stringify({ erro: "Digite o nome do cliente." }) };
-    }
-    const numMeses = Number(meses);
-    if (!numMeses || numMeses <= 0) {
-        return { statusCode: 400, body: JSON.stringify({ erro: "Número de meses inválido." }) };
-    }
-
-    try {
-        const registros = await listarRegistrosDeAssinatura();
-        const busca = normalizar(nome);
-        let encontrados = registros.filter((r) => normalizar(r.nome).indexOf(busca) !== -1);
-
-        // Se veio e-mail junto, usa ele pra desempatar quando tem mais de
-        // um cliente com nome igual/parecido.
-        const buscaEmail = normalizar(email);
-        if (buscaEmail) {
-            const comEmail = encontrados.filter((r) => normalizar(r.email) === buscaEmail);
-            if (comEmail.length > 0) encontrados = comEmail;
+        const b = L.parseBody(event);
+        const senha = process.env.SUPORTE_SENHA || "cafe-suporte-2026";
+        if (!b.senha || b.senha !== senha) return L.resp(401, { erro: "Senha incorreta.", versao: VERSAO });
+        if (b.acao === "listar") {
+            const todos = await L.listarTodos("c_");
+            const agora = Date.now();
+            const lista = todos.map(x => ({ nome: x.dados.nome, email: x.dados.email, codigo: x.dados.codigo,
+                validoAte: Number(x.dados.validoAte), vencimento: L.fmtData(Number(x.dados.validoAte)), ativo: Number(x.dados.validoAte) > agora }))
+                .sort((a, b2) => b2.validoAte - a.validoAte);
+            return L.resp(200, { ok: true, clientes: lista, versao: VERSAO });
         }
-
-        if (encontrados.length === 0) {
-            return {
-                statusCode: 404,
-                body: JSON.stringify({ erro: "Nenhum cliente encontrado com esse nome (e e-mail, se informado). Ele precisa ter aberto a tela de assinatura no app pelo menos uma vez." }),
-            };
+        const meses = Math.round(Number(b.meses));
+        if (!(meses >= 1 && meses <= 36)) return L.resp(400, { erro: "Meses deve ser de 1 a 36." });
+        if (b.acao === "criar") {
+            const nome = String(b.nome || "").trim().replace(/\s+/g, " ").slice(0, 80);
+            if (nome.length < 3 || !L.emailValido(String(b.email || "").trim())) return L.resp(400, { erro: "Informe nome completo e e-mail válido." });
+            const r = await L.ativarOuRenovar({ nome, email: String(b.email).trim(), meses, marca: { liberadoManual: true } });
+            await L.avisarPlanilha({ acao: r.novo ? "ativacao" : "renovacao", nome: r.dados.nome, email: r.dados.email, codigo: r.codigo,
+                plano: "Liberação manual (" + meses + " mês(es))", valor: 0, inicio: L.fmtData(Date.now()), vencimento: L.fmtData(r.validoAte) });
+            return L.resp(200, { ok: true, nome: r.dados.nome, email: r.dados.email, codigo: r.codigo, validoAte: r.validoAte,
+                vencimento: L.fmtData(r.validoAte), criado: r.novo, versao: VERSAO });
         }
-        // Cada instalação do app (navegador, atalho na tela inicial, dados
-        // limpos) cria um cadastro próprio. Se todos os cadastros achados têm
-        // o MESMO e-mail, é a mesma pessoa em vários aparelhos: libera todos.
-        const emailsUnicos = new Set(encontrados.map((r) => normalizar(r.email)));
-        const mesmaPessoa = encontrados.length > 1 && emailsUnicos.size === 1 && !emailsUnicos.has("");
-        if (encontrados.length > 1 && !mesmaPessoa) {
-            return {
-                statusCode: 409,
-                body: JSON.stringify({
-                    erro: "Mais de um cliente encontrado com esse nome. Informe também o e-mail pra identificar certo.",
-                    opcoes: encontrados.map((r) => ({ nome: r.nome, email: r.email })),
-                    versao: VERSAO,
-                }),
-            };
-        }
+        const busca = String(b.busca || b.nome || "").trim().toLowerCase();
+        if (busca.length < 3) return L.resp(400, { erro: "Digite pelo menos 3 letras (nome, e-mail ou código)." });
 
-        const validoAte = new Date();
-        validoAte.setMonth(validoAte.getMonth() + numMeses);
+        const todos = await L.listarTodos("c_");
+        const cod = L.normalizaCodigo(busca);
+        const canon = L.emailCanonico(busca);
+        let achados = todos.filter(x => (cod && x.dados.codigo === cod) || (canon && x.dados.emailCanon === canon));
+        if (!achados.length) achados = todos.filter(x =>
+            String(x.dados.nome).toLowerCase().includes(busca) || String(x.dados.email).toLowerCase().includes(busca));
+        if (!achados.length) return L.resp(404, { erro: "Ninguém encontrado com esse texto.", versao: VERSAO });
+        if (achados.length > 1) return L.resp(409, { erro: "Mais de um cliente encontrado. Use o código ou o e-mail completo.",
+            opcoes: achados.slice(0, 10).map(x => ({ nome: x.dados.nome, email: x.dados.email, codigo: x.dados.codigo })), versao: VERSAO });
 
-        const campos = {
-            status: { stringValue: "authorized" },
-            liberadoManualmente: { booleanValue: true },
-            validoAte: { stringValue: validoAte.toISOString() },
-            atualizadoEm: { stringValue: new Date().toISOString() },
-        };
-        const mask = "?updateMask.fieldPaths=status&updateMask.fieldPaths=liberadoManualmente" +
-            "&updateMask.fieldPaths=validoAte&updateMask.fieldPaths=atualizadoEm";
-
-        const token = await obterTokenAdmin();
-        for (const alvo of encontrados) {
-            const resp = await fetch(baseUrl() + "/" + alvo.docId + mask, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-                body: JSON.stringify({ fields: campos }),
-            });
-            if (!resp.ok) {
-                const detalhe = await resp.text();
-                return { statusCode: 500, body: JSON.stringify({ erro: "Não consegui gravar a liberação.", detalhes: detalhe }) };
+        const alvo = achados[0];
+        for (let t = 0; t < 3; t++) {
+            const c = t === 0 ? alvo : await L.lerDoc(alvo.id);
+            const agora = Date.now();
+            const novo = L.somaMeses(Math.max(agora, Number(c.dados.validoAte) || 0), meses);
+            const g = await L.gravar([{ id: alvo.id, updateTime: c.updateTime,
+                dados: { validoAte: novo, trial: false, liberadoManual: true } }]);
+            if (g.ok) {
+                await L.avisarPlanilha({ acao: "renovacao", nome: c.dados.nome, email: c.dados.email, codigo: c.dados.codigo,
+                    plano: "Liberação manual (" + meses + " mês(es))", valor: 0, vencimento: L.fmtData(novo) });
+                return L.resp(200, { ok: true, nome: c.dados.nome, email: c.dados.email, codigo: c.dados.codigo,
+                    validoAte: novo, vencimento: L.fmtData(novo), versao: VERSAO });
             }
         }
-
-        return {
-            statusCode: 200,
-            body: JSON.stringify({
-                ok: true,
-                nome: encontrados[0].nome,
-                email: encontrados[0].email,
-                validoAte: validoAte.toISOString(),
-                cadastrosLiberados: encontrados.length,
-            }),
-        };
+        return L.resp(409, { erro: "Conflito ao gravar, tente de novo." });
     } catch (e) {
-        return { statusCode: 500, body: JSON.stringify({ erro: "Erro interno ao liberar.", detalhes: String(e) }) };
+        console.error("liberar-manual:", e);
+        return L.resp(500, { erro: "Erro no servidor.", versao: VERSAO });
     }
 };
