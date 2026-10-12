@@ -3,7 +3,7 @@
 // acao:"listar" lista clientes; acao:"criar" cria acesso manual (nome+email+meses).
 // "busca" pode ser código, e-mail ou parte do nome. Soma N meses.
 const L = require("./lib/firestore");
-const VERSAO = "v4-pago-desde-inicio-2026-10-10";
+const VERSAO = "v5-lembretes-2026-10-12";
 
 exports.handler = async (event) => {
     if (event.httpMethod === "OPTIONS") return L.resp(200, {});
@@ -16,7 +16,7 @@ exports.handler = async (event) => {
             const todos = await L.listarTodos("c_");
             const agora = Date.now();
             const lista = todos.map(x => ({ nome: x.dados.nome, email: x.dados.email, codigo: x.dados.codigo,
-                validoAte: Number(x.dados.validoAte), vencimento: L.fmtData(Number(x.dados.validoAte)), ativo: Number(x.dados.validoAte) > agora }))
+                whatsapp: x.dados.whatsapp || "", dias: L.diasPara(x.dados.validoAte, agora), validoAte: Number(x.dados.validoAte), vencimento: L.fmtData(Number(x.dados.validoAte)), ativo: Number(x.dados.validoAte) > agora }))
                 .sort((a, b2) => b2.validoAte - a.validoAte);
             return L.resp(200, { ok: true, clientes: lista, versao: VERSAO });
         }
