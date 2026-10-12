@@ -167,7 +167,8 @@ const INTERVALO_REENVIO_MS = 2 * 60 * 1000;
 // Cria o cliente (código novo) com N meses a partir de agora. Se o e-mail já
 // existe, soma os meses ao código existente. Devolve { codigo, novo, validoAte, dados }.
 // extras = gravações adicionais (ex.: p_<pagamento>, pedido) feitas na MESMA operação atômica.
-async function ativarOuRenovar({ nome, email, meses, extras, marca }) {
+async function ativarOuRenovar({ nome, email, meses, extras, marca, whatsapp }) {
+    const zap = zapNumero(whatsapp);
     const canon = emailCanonico(email);
     const idE = idEmail(canon);
     for (let t = 0; t < 5; t++) {
@@ -178,13 +179,13 @@ async function ativarOuRenovar({ nome, email, meses, extras, marca }) {
             if (!c) throw new Error("cadastro inconsistente");
             const novo = somaMeses(Math.max(agora, Number(c.dados.validoAte) || 0), meses);
             const g = await gravar([].concat(extras || [], [{ id: "c_" + c.dados.codigo, updateTime: c.updateTime,
-                dados: Object.assign({ validoAte: novo, ultimoPagamento: agora }, marca || {}) }]));
+                dados: Object.assign({ validoAte: novo, ultimoPagamento: agora }, zap ? { whatsapp: zap } : {}, marca || {}) }]));
             if (g.ok) return { codigo: c.dados.codigo, novo: false, validoAte: novo, dados: c.dados };
             continue;
         }
         const codigo = novoCodigo();
         const validoAte = somaMeses(agora, meses);
-        const dados = Object.assign({ codigo, nome, email, emailCanon: canon, inicio: agora, validoAte, criadoEm: agora, ultimoEnvio: agora, ultimoPagamento: agora }, marca || {});
+        const dados = Object.assign({ codigo, nome, email, emailCanon: canon, inicio: agora, validoAte, criadoEm: agora, ultimoEnvio: agora, ultimoPagamento: agora }, zap ? { whatsapp: zap } : {}, marca || {});
         const g = await gravar([].concat(extras || [], [
             { id: idE, dados: { codigo, emailCanon: canon }, criar: true },
             { id: "c_" + codigo, dados, criar: true },
@@ -193,6 +194,15 @@ async function ativarOuRenovar({ nome, email, meses, extras, marca }) {
     }
     throw new Error("conflito ao ativar");
 }
+
+// Telefone brasileiro só com dígitos, com DDI 55. Devolve "" se não parecer válido.
+function zapNumero(v) {
+    let d = String(v || "").replace(/\D/g, "");
+    if (d.indexOf("55") === 0 && d.length >= 12) d = d.slice(2);
+    if (d.length < 10 || d.length > 11) return "";
+    return "55" + d;
+}
+function diasPara(validoAte, agora) { return Math.ceil((Number(validoAte) - (agora || Date.now())) / 86400000); }
 
 function parseBody(event) {
     try { return JSON.parse(event.body || "{}"); } catch (e) { return {}; }
@@ -206,5 +216,5 @@ function statusDe(d, agora) {
     };
 }
 
-module.exports = { INTERVALO_REENVIO_MS, ativarOuRenovar, COLECAO, PLANOS, resp, lerDoc, listarTodos, gravar, emailCanonico, emailValido, idEmail,
+module.exports = { zapNumero, diasPara, INTERVALO_REENVIO_MS, ativarOuRenovar, COLECAO, PLANOS, resp, lerDoc, listarTodos, gravar, emailCanonico, emailValido, idEmail,
     novoCodigo, normalizaCodigo, somaMeses, fmtData, avisarPlanilha, parseBody, statusDe };
