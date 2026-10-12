@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-10-12-v121-lembretes";
+const APP_VERSION = "build-2026-10-12-v122-foto-galeria";
 const APP_UPDATED_AT = "12/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -2698,6 +2698,7 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
     const [enviandoFoto, setEnviandoFoto] = useState(false);
     const [erroFoto, setErroFoto] = useState("");
     const fotoInputRef = useRef(null);
+    const galeriaInputRef = useRef(null);
     const escolherFoto = async (e) => {
         const file = e.target.files && e.target.files[0];
         e.target.value = "";
@@ -2823,10 +2824,13 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
             qtdSelecionados === 0 && (React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "Nenhuma despesa ser\u00E1 lan\u00E7ada agora \u2014 s\u00F3 vai pro estoque.")))),
         React.createElement(Field, { label: "Foto do produto (opcional)" },
             React.createElement("input", { ref: fotoInputRef, type: "file", accept: "image/*", capture: "environment", className: "hidden", onChange: escolherFoto }),
+            React.createElement("input", { ref: galeriaInputRef, type: "file", accept: "image/*", className: "hidden", onChange: escolherFoto }),
             !fotoBase64 ? (
-                React.createElement("button", { type: "button", onClick: () => fotoInputRef.current && fotoInputRef.current.click(), disabled: enviandoFoto, className: "w-full flex items-center justify-center gap-2 border-2 border-dashed border-stone-300 text-stone-500 rounded-lg py-4 text-sm" },
-                    React.createElement(Icon, { name: "clipboard", size: 16 }),
-                    enviandoFoto ? "Processando..." : "Tirar ou escolher foto")
+                React.createElement("div", { className: "flex gap-2" },
+                    React.createElement("button", { type: "button", onClick: () => fotoInputRef.current && fotoInputRef.current.click(), disabled: enviandoFoto, className: "flex-1 flex items-center justify-center gap-2 border-2 border-dashed border-stone-300 text-stone-500 rounded-lg py-4 text-sm" },
+                        enviandoFoto ? "Processando..." : "\uD83D\uDCF7 Tirar foto"),
+                    React.createElement("button", { type: "button", onClick: () => galeriaInputRef.current && galeriaInputRef.current.click(), disabled: enviandoFoto, className: "flex-1 flex items-center justify-center gap-2 border-2 border-dashed border-stone-300 text-stone-500 rounded-lg py-4 text-sm" },
+                        enviandoFoto ? "Processando..." : "\uD83D\uDDBC\uFE0F Escolher da galeria"))
             ) : (
                 React.createElement("div", { className: "relative inline-block" },
                     React.createElement("img", { src: fotoBase64, className: "h-28 w-28 object-cover rounded-lg border border-stone-200" }),
