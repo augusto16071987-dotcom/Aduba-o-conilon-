@@ -1,147 +1,71 @@
-// netlify/functions/mp-webhook.js
-//
-// O Mercado Pago chama essa URL sozinho toda vez que algo muda numa
-// assinatura (nova, autorizada, pausada, cancelada, cobrança do mês).
-// A função busca os dados de verdade na API do Mercado Pago (nunca confia
-// só no que veio na notificação) e grava o status atual no Firestore, no
-// mesmo banco de dados que o app já usa pra sincronizar.
-//
-// Configurar essa URL no painel do Mercado Pago em:
-// Suas integrações > (aplicação NutriCafe) > Webhooks
-//   URL: https://SEU-SITE.netlify.app/.netlify/functions/mp-webhook
-//   Eventos: "Assinaturas" (subscription_preapproval)
-//
-// Precisa da variável de ambiente MP_ACCESS_TOKEN configurada no Netlify.
-
-const FIREBASE_PROJECT_ID = "backup-bb0d9";
-const FIRESTORE_COLECAO = "nutricafe_dados";
-
-function firestoreDocUrl(docId) {
-    return "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
-        "/databases/(default)/documents/" + FIRESTORE_COLECAO + "/" + docId;
-}
-
-const crypto = require("crypto");
-function base64url(input) {
-    return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-// Gera um token de acesso "de servidor" a partir da chave de serviço do
-// Firebase (variável de ambiente FIREBASE_SERVICE_ACCOUNT). Esse token
-// ignora as regras de segurança do Firestore — só o servidor consegue
-// gerar ele, porque só o servidor tem a chave privada.
-async function obterTokenAdmin() {
-    const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    const agora = Math.floor(Date.now() / 1000);
-    const header = { alg: "RS256", typ: "JWT" };
-    const claim = {
-        iss: sa.client_email,
-        scope: "https://www.googleapis.com/auth/datastore",
-        aud: "https://oauth2.googleapis.com/token",
-        exp: agora + 3600,
-        iat: agora,
-    };
-    const semAssinar = base64url(JSON.stringify(header)) + "." + base64url(JSON.stringify(claim));
-    const assinador = crypto.createSign("RSA-SHA256");
-    assinador.update(semAssinar);
-    assinador.end();
-    const assinatura = assinador.sign(sa.private_key).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    const jwt = semAssinar + "." + assinatura;
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=" + encodeURIComponent(jwt),
-    });
-    const dados = await res.json();
-    if (!dados.access_token) throw new Error("Não consegui autenticar com o Firebase (admin).");
-    return dados.access_token;
-}
-
-async function salvarStatusAssinatura(clienteId, preapproval) {
-    const docId = ("assinatura--" + clienteId).replace(/[^a-zA-Z0-9_-]/g, "_");
-    // O "reason" vem como "Assinatura NutriCafé — Nome Do Cliente" — extrai
-    // só o nome pra manter o registro localizável por nome no painel de suporte.
-    let nome = "";
-    if (preapproval.reason && preapproval.reason.indexOf("—") !== -1) {
-        nome = preapproval.reason.split("—").slice(1).join("—").trim();
-    }
-    const campos = {
-        status: { stringValue: preapproval.status || "" },
-        preapprovalId: { stringValue: preapproval.id || "" },
-        email: { stringValue: preapproval.payer_email || "" },
-        atualizadoEm: { stringValue: new Date().toISOString() },
-    };
-    let mask = "?updateMask.fieldPaths=status&updateMask.fieldPaths=preapprovalId" +
-        "&updateMask.fieldPaths=email&updateMask.fieldPaths=atualizadoEm";
-    if (nome) {
-        campos.nome = { stringValue: nome };
-        mask += "&updateMask.fieldPaths=nome";
-    }
-    // A Mercado Pago já calcula quando é a próxima cobrança (inclui o fim
-    // do período grátis) — só precisamos guardar isso pra mostrar pro
-    // cliente dentro do app.
-    if (preapproval.next_payment_date) {
-        campos.proximaCobranca = { stringValue: preapproval.next_payment_date };
-        mask += "&updateMask.fieldPaths=proximaCobranca";
-    }
-    const token = await obterTokenAdmin();
-    await fetch(firestoreDocUrl(docId) + mask, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-        body: JSON.stringify({ fields: campos }),
-    });
-}
+// netlify/functions/webhook-pagamento.js
+// O Mercado Pago avisa aqui quando um pagamento muda. NÃO confiamos no aviso:
+// consultamos o pagamento na API do MP, conferimos valor/plano/status e só
+// então somamos os meses. Cada pagamento só conta uma vez (documento p_<id>).
+const L = require("./lib/firestore");
 
 exports.handler = async (event) => {
-    const ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
-
-    // Sempre respondemos 200 pro Mercado Pago não ficar tentando de novo
-    // em loop — qualquer problema aqui é só logado, nunca vira erro pra ele.
-    const ok = { statusCode: 200, body: "ok" };
-    if (!ACCESS_TOKEN) {
-        console.error("MP_ACCESS_TOKEN não configurado");
-        return ok;
-    }
-
+    if (event.httpMethod === "GET") return L.resp(200, { ok: true, servico: "webhook-pagamento" });
+    if (event.httpMethod !== "POST") return L.resp(405, { erro: "Use POST." });
     try {
-        let preapprovalId = null;
+        const q = event.queryStringParameters || {};
+        const b = L.parseBody(event);
+        const tipo = q.type || q.topic || b.type || b.topic || "";
+        if (tipo && tipo !== "payment") return L.resp(200, { ignorado: tipo });
+        const pid = String(q["data.id"] || q.id || (b.data && b.data.id) || b.id || "").replace(/[^0-9]/g, "");
+        if (!pid) return L.resp(200, { ignorado: "sem id" });
 
-        // Formato novo (o mais comum): POST com corpo JSON
-        if (event.body) {
-            try {
-                const corpo = JSON.parse(event.body);
-                if (corpo && corpo.data && corpo.data.id &&
-                    (corpo.type === "subscription_preapproval" || corpo.type === "preapproval")) {
-                    preapprovalId = corpo.data.id;
-                }
-            } catch (e) {
-                // corpo não era JSON — segue pra tentar pela query string
+        const r = await fetch("https://api.mercadopago.com/v1/payments/" + pid, {
+            headers: { Authorization: "Bearer " + process.env.MP_ACCESS_TOKEN } });
+        if (!r.ok) { console.error("MP GET payment", pid, r.status); return L.resp(r.status === 404 ? 200 : 500, { erro: "consulta" }); }
+        const p = await r.json();
+        if (p.status !== "approved") return L.resp(200, { ignorado: "status " + p.status });
+
+        const ref = String(p.external_reference || "");
+        const ehPedido = ref.indexOf("P:") === 0;
+        const chave = ehPedido ? null : ref.split("|")[1];
+        let plano = L.PLANOS[chave], codigoRenov = "", pedido = null, pedidoId = "";
+        if (ehPedido) {
+            pedidoId = ref.slice(2).replace(/[^a-f0-9]/g, "");
+            pedido = pedidoId ? await L.lerDoc("o_" + pedidoId) : null;
+            if (!pedido) { console.error("pedido sumiu", ref); return L.resp(200, { ignorado: "pedido" }); }
+            plano = L.PLANOS[pedido.dados.plano];
+        } else {
+            codigoRenov = L.normalizaCodigo(ref.split("|")[0]);
+        }
+        if (!plano || (!ehPedido && !codigoRenov)) { console.error("ref inválida", ref); return L.resp(200, { ignorado: "ref" }); }
+        if (p.currency_id !== "BRL" || Math.abs(Number(p.transaction_amount) - plano.preco) > 0.001) {
+            console.error("valor divergente", pid, p.transaction_amount, plano.preco);
+            return L.resp(200, { ignorado: "valor" });
+        }
+        if (await L.lerDoc("p_" + pid)) return L.resp(200, { ok: true, jaProcessado: true });
+        const agora = Date.now();
+        const pgto = { id: "p_" + pid, criar: true, dados: { plano: ehPedido ? pedido.dados.plano : chave, valor: Math.round(plano.preco * 100), em: agora } };
+
+        if (ehPedido) {
+            const r2 = await L.ativarOuRenovar({ nome: pedido.dados.nome, email: pedido.dados.email, meses: plano.meses, extras: [pgto], whatsapp: pedido.dados.whatsapp });
+            // liga o pedido ao código (o app descobre o código por aqui)
+            await L.gravar([{ id: "o_" + pedidoId, dados: { codigo: r2.codigo }, updateTime: (await L.lerDoc("o_" + pedidoId)).updateTime }]).catch(() => {});
+            const acao = r2.novo ? "ativacao" : "renovacao";
+            await L.avisarPlanilha({ acao, nome: r2.dados.nome, email: r2.dados.email, codigo: r2.codigo,
+                plano: plano.titulo, valor: plano.preco, inicio: L.fmtData(agora), vencimento: L.fmtData(r2.validoAte) });
+            return L.resp(200, { ok: true });
+        }
+        for (let t = 0; t < 4; t++) {
+            const c = await L.lerDoc("c_" + codigoRenov);
+            if (!c) { console.error("cliente sumiu", codigoRenov); return L.resp(200, { ignorado: "cliente" }); }
+            const novo = L.somaMeses(Math.max(agora, Number(c.dados.validoAte) || 0), plano.meses);
+            const g = await L.gravar([pgto, { id: "c_" + codigoRenov, updateTime: c.updateTime, dados: { validoAte: novo, ultimoPagamento: agora } }]);
+            if (g.ok) {
+                await L.avisarPlanilha({ acao: "renovacao", nome: c.dados.nome, email: c.dados.email, codigo: codigoRenov,
+                    plano: plano.titulo, valor: plano.preco, vencimento: L.fmtData(novo) });
+                return L.resp(200, { ok: true });
             }
+            if ((await L.lerDoc("p_" + pid))) return L.resp(200, { ok: true, jaProcessado: true });
         }
-
-        // Formato antigo (IPN): vem como parâmetros na URL
-        const params = event.queryStringParameters || {};
-        if (!preapprovalId && params.id && (params.topic === "preapproval" || params.type === "preapproval")) {
-            preapprovalId = params.id;
-        }
-
-        if (!preapprovalId) {
-            // Notificação de outro tipo (ex: pagamento avulso da fatura mensal) —
-            // não precisamos fazer nada, o status do preapproval já reflete tudo.
-            return ok;
-        }
-
-        const resposta = await fetch("https://api.mercadopago.com/preapproval/" + preapprovalId, {
-            headers: { "Authorization": "Bearer " + ACCESS_TOKEN },
-        });
-        const preapproval = await resposta.json();
-
-        if (resposta.ok && preapproval.external_reference) {
-            await salvarStatusAssinatura(preapproval.external_reference, preapproval);
-        }
+        return L.resp(500, { erro: "conflito, tentar de novo" }); // MP reenvia
     } catch (e) {
-        console.error("Erro no webhook do Mercado Pago:", e);
+        console.error("webhook:", e);
+        return L.resp(500, { erro: "erro" });
     }
-
-    return ok;
 };
