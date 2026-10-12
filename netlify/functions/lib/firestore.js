@@ -12,8 +12,8 @@ const BASE = "https://firestore.googleapis.com/v1/" + RAIZ;
 // Preços e prazos SÓ existem aqui (servidor). O app nunca manda valor.
 const PLANOS = {
     mensal:    { meses: 1,  preco: 9.9,  titulo: "NutriCafé - 1 mês" },
-    semestral: { meses: 6,  preco: 55.0, titulo: "NutriCafé - 6 meses" },
-    anual:     { meses: 12, preco: 100.0, titulo: "NutriCafé - 1 ano" },
+    semestral: { meses: 6,  preco: 54.9, titulo: "NutriCafé - 6 meses" },
+    anual:     { meses: 12, preco: 99.9, titulo: "NutriCafé - 1 ano" },
 };
 
 const CORS = {
