@@ -20,7 +20,7 @@ exports.handler = async (event) => {
 
         const pedido = crypto.randomBytes(12).toString("hex");
         const g = await L.gravar([{ id: "o_" + pedido, criar: true, dados: {
-            nome, email, emailCanon: L.emailCanonico(email), plano: b.plano, criadoEm: Date.now(), codigo: "" } }]);
+            nome, email, whatsapp: L.zapNumero(b.whatsapp), emailCanon: L.emailCanonico(email), plano: b.plano, criadoEm: Date.now(), codigo: "" } }]);
         if (!g.ok) return L.resp(500, { erro: "Tente novamente." });
 
         const r = await fetch("https://api.mercadopago.com/checkout/preferences", {
