@@ -45,8 +45,8 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-10-10-v119-pago-desde-inicio";
-const APP_UPDATED_AT = "10/10/2026";
+const APP_VERSION = "build-2026-10-12-v120-precos";
+const APP_UPDATED_AT = "12/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
    ÍCONES — SVGs simples embutidos (sem dependência externa)
@@ -730,8 +730,8 @@ const ATIVACAO_STORAGE_KEY = STORAGE_PREFIX + "ativacao";
 const WHATSAPP_NUMERO = "5561983819713";
 const PLANOS_ASSINATURA = [
     { id: "mensal", rotulo: "1 mês", preco: "R$ 9,90", detalhe: "R$ 9,90 por mês" },
-    { id: "semestral", rotulo: "6 meses", preco: "R$ 55,00", detalhe: "Economiza R$ 4,40 • R$ 9,17 por mês" },
-    { id: "anual", rotulo: "1 ano", preco: "R$ 100,00", detalhe: "Economiza R$ 18,80 • R$ 8,33 por mês", destaque: true },
+    { id: "semestral", rotulo: "6 meses", preco: "R$ 54,90", detalhe: "Economiza R$ 4,50 • R$ 9,15 por mês" },
+    { id: "anual", rotulo: "1 ano", preco: "R$ 99,90", detalhe: "Economiza R$ 18,90 • R$ 8,33 por mês", destaque: true },
 ];
 function linkWhatsApp(mensagem) {
     return "https://wa.me/" + WHATSAPP_NUMERO + "?text=" + encodeURIComponent(mensagem);
@@ -5059,7 +5059,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
         ] },
         { id: "assinatura", titulo: "Assinatura", itens: [
             ["Como ativar", "Ao abrir o app pela primeira vez, informe seu nome e e-mail (duas vezes, pra garantir que está certo), escolha o plano e pague por PIX ou cartão pelo Mercado Pago. Assim que o pagamento confirma, o app libera sozinho e você recebe por e-mail um código de ativação (ex.: K7QM-4TXA). Guarde esse e-mail."],
-            ["Planos", "1 mês: R$ 9,90 • 6 meses: R$ 55,00 • 1 ano: R$ 100,00. Não há cobrança automática: nada é cobrado sozinho no seu cartão, você só paga quando quiser renovar."],
+            ["Planos", "1 mês: R$ 9,90 • 6 meses: R$ 54,90 • 1 ano: R$ 99,90. Não há cobrança automática: nada é cobrado sozinho no seu cartão, você só paga quando quiser renovar."],
             ["Quando vencer", "O app trava e mostra a tela de renovação: escolha o período e pague. Se renovar antes de vencer, os dias que sobraram são somados. Em {{Configurações|configuracoes}} dá pra ver seu código, o vencimento e renovar; o app também avisa na tela inicial quando faltam 5 dias ou menos."],
             ["Troquei de celular / perdi o acesso", "Na primeira tela toque em \"Já tenho um código\" e digite o código do e-mail. Se perdeu o e-mail, digite seu e-mail ali mesmo e toque em \"Reenviar código\"."],
             ["Problema com o pagamento", "Se pagou e o app não liberou, toque em \"Já paguei — atualizar\". Se continuar, fale pelo WhatsApp: o acesso pode ser liberado manualmente."],
