@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-10-15-v126-fluxo-passos";
+const APP_VERSION = "build-2026-10-15-v127-sem-whats-rodape";
 const APP_UPDATED_AT = "15/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -880,13 +880,13 @@ function TelaAssinatura({ onAtivado }) {
             return () => clearInterval(t);
         }
     }, [etapa, aguardando]);
-    const Cartao = (filhos) => React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6 py-8" },
+    const Cartao = (filhos, semSuporte) => React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6 py-8" },
         React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl border border-stone-200 p-6" },
             React.createElement("div", { className: "w-14 h-14 rounded-full bg-[#e7ebdd] text-[#33422e] flex items-center justify-center mx-auto mb-3" },
                 React.createElement(Icon, { name: "leaf", size: 26 })),
             React.createElement("h1", { className: "text-lg font-bold text-stone-800 text-center" }, "NutriCafé"),
             filhos,
-            React.createElement("a", { href: linkWhatsApp("Olá! Preciso de ajuda com o acesso ao NutriCafé."), target: "_blank", rel: "noopener noreferrer", className: "w-full mt-4 flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold" },
+            semSuporte ? null : React.createElement("a", { href: linkWhatsApp("Olá! Preciso de ajuda com o acesso ao NutriCafé."), target: "_blank", rel: "noopener noreferrer", className: "w-full mt-4 flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold" },
                 React.createElement(Icon, { name: "whatsapp", size: 17 }), " Falar no WhatsApp")));
     const msgErro = erro && React.createElement("p", { key: "er", className: "text-xs text-[#a8442f] mb-2" }, erro);
     const msgAviso = aviso && React.createElement("p", { key: "av", className: "text-xs text-[#33422e] bg-[#e7ebdd] rounded-lg p-2 mb-2" }, aviso);
@@ -956,7 +956,7 @@ function TelaAssinatura({ onAtivado }) {
             React.createElement("button", { key: "b", onClick: pedirTeste, disabled: !okTeste || ocupado, className: "w-full flex items-center justify-center gap-2 bg-[#25D366] text-white font-bold rounded-xl py-3.5 shadow disabled:opacity-40" },
                 React.createElement(Icon, { name: "whatsapp", size: 18 }), " Pedir pelo WhatsApp"),
             voltar,
-        ]);
+        ], true);
     }
     if (passo === "compra") {
         return Cartao([
@@ -971,7 +971,7 @@ function TelaAssinatura({ onAtivado }) {
             React.createElement("button", { key: "b", onClick: comprar, disabled: !okForm || ocupado, className: btn }, ocupado ? "Abrindo pagamento..." : "Pagar e ativar"),
             React.createElement("p", { key: "p", className: "text-[11px] text-stone-400 text-center mt-2" }, "Pagamento por PIX ou cart\u00E3o pelo Mercado Pago. Sem cobran\u00E7a autom\u00E1tica: voc\u00EA s\u00F3 paga quando quiser renovar. O c\u00F3digo de ativa\u00E7\u00E3o chega no seu e-mail."),
             voltar,
-        ]);
+        ], true);
     }
     return Cartao([
         React.createElement("p", { key: "t", className: "text-sm text-stone-500 text-center mt-1 mb-4" }, "Bem-vindo! Escolha como quer come\u00E7ar:"),
@@ -982,7 +982,7 @@ function TelaAssinatura({ onAtivado }) {
         ...cartoesPlano((id) => { setPlano(id); setPasso("compra"); setErro(""); }),
         React.createElement("p", { key: "p", className: "text-[11px] text-stone-400 text-center mt-1" }, "Pagamento por PIX ou cart\u00E3o pelo Mercado Pago. Sem cobran\u00E7a autom\u00E1tica."),
         React.createElement("button", { key: "j", onClick: () => { setEtapa("ja"); setErro(""); }, className: "w-full text-center text-xs text-[#4c6146] font-semibold mt-4 underline" }, "J\u00E1 tenho um c\u00F3digo"),
-    ]);
+    ], true);
 }
 async function loadList(key) {
     try {
