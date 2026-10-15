@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-10-15-v125-teste-whatsapp";
+const APP_VERSION = "build-2026-10-15-v126-fluxo-passos";
 const APP_UPDATED_AT = "15/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -793,6 +793,7 @@ function TelaAssinatura({ onAtivado }) {
     const [email2, setEmail2] = useState("");
     const [whats, setWhats] = useState("");
     const [plano, setPlano] = useState("anual");
+    const [passo, setPasso] = useState("escolha");
     const [codigo, setCodigo] = useState("");
     const [erro, setErro] = useState("");
     const [aviso, setAviso] = useState("");
@@ -930,28 +931,57 @@ function TelaAssinatura({ onAtivado }) {
             React.createElement("button", { key: "v", onClick: () => { setEtapa("ativar"); setErro(""); setAviso(""); }, className: "w-full text-center text-xs text-stone-500 mt-3" }, "Voltar"),
         ]);
     }
-    const okForm = nome.trim().length >= 3 && email.trim() && email2.trim();
-    return Cartao([
-        React.createElement("p", { key: "t", className: "text-sm text-stone-500 text-center mt-1 mb-4" }, "Ative seu acesso: informe seus dados, escolha o plano e pague. O código de ativação chega no seu e-mail."),
+    const emailsOk = email.trim() && email2.trim();
+    const okForm = nome.trim().length >= 3 && emailsOk;
+    const okTeste = okForm && whats.replace(/\D/g, "").length >= 10;
+    const planoEscolhido = PLANOS_ASSINATURA.find((x) => x.id === plano) || PLANOS_ASSINATURA[2];
+    const voltar = React.createElement("button", { key: "vt", onClick: () => { setPasso("escolha"); setErro(""); }, className: "w-full text-center text-xs text-stone-500 font-semibold mt-3" }, "\u2190 Voltar");
+    const campos = (whatsObrigatorio) => [
         React.createElement(Field, { key: "n", label: "Seu nome" },
             React.createElement("input", { className: inputCls, placeholder: "Nome completo", value: nome, onChange: (e) => setNome(e.target.value), disabled: ocupado })),
         React.createElement(Field, { key: "e", label: "Seu e-mail" },
             React.createElement("input", { type: "email", className: inputCls, placeholder: "seu@email.com", value: email, onChange: (e) => setEmail(e.target.value), disabled: ocupado })),
         React.createElement(Field, { key: "e2", label: "Repita o e-mail" },
             React.createElement("input", { type: "email", className: inputCls, placeholder: "seu@email.com", value: email2, onChange: (e) => setEmail2(e.target.value), disabled: ocupado })),
-        React.createElement(Field, { key: "w", label: "WhatsApp (opcional)" },
+        React.createElement(Field, { key: "w", label: whatsObrigatorio ? "WhatsApp (com DDD)" : "WhatsApp (opcional)" },
             React.createElement("input", { type: "tel", className: inputCls, placeholder: "(27) 99999-9999", value: whats, onChange: (e) => setWhats(e.target.value), disabled: ocupado })),
-        React.createElement("p", { key: "wn", className: "text-[11px] text-stone-400 -mt-2 mb-3" }, "Usado s\u00F3 para avisar quando o acesso estiver perto de vencer."),
-        React.createElement("p", { key: "pl", className: "text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2 mt-1" }, "Plano"),
-        ...cartoesPlano((id) => setPlano(id), plano),
-        msgErro,
-        React.createElement("button", { key: "b", onClick: comprar, disabled: !okForm || ocupado, className: btn }, ocupado ? "Abrindo pagamento..." : "Pagar e ativar"),
-        React.createElement("p", { key: "p", className: "text-[11px] text-stone-400 text-center mt-2" }, "Pagamento por PIX ou cartão pelo Mercado Pago. Sem cobrança automática: você só paga quando quiser renovar."),
-        React.createElement("div", { key: "tg", className: "mt-4 pt-3 border-t border-stone-100" },
-            React.createElement("button", { onClick: pedirTeste, disabled: ocupado, className: "w-full flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold disabled:opacity-40" },
-                React.createElement(Icon, { name: "whatsapp", size: 17 }), " Quero testar gr\u00E1tis por 1 m\u00EAs"),
-            React.createElement("p", { className: "text-[11px] text-stone-400 text-center mt-1" }, "Preencha seus dados acima (inclusive o WhatsApp) e toque aqui. Enviamos o c\u00F3digo para o seu e-mail.")),
-        React.createElement("button", { key: "j", onClick: () => { setEtapa("ja"); setErro(""); }, className: "w-full text-center text-xs text-[#4c6146] font-semibold mt-4 underline" }, "Já tenho um código"),
+        React.createElement("p", { key: "wn", className: "text-[11px] text-stone-400 -mt-2 mb-3" }, whatsObrigatorio ? "Usado para te enviar o teste e avisar quando o acesso estiver perto de vencer." : "Usado s\u00F3 para avisar quando o acesso estiver perto de vencer."),
+    ];
+    if (passo === "teste") {
+        return Cartao([
+            React.createElement("p", { key: "t", className: "text-base font-bold text-stone-800 text-center mt-1" }, "\uD83C\uDF81 Teste gr\u00E1tis de 1 m\u00EAs"),
+            React.createElement("p", { key: "s", className: "text-sm text-stone-500 text-center mt-1 mb-4" }, "Preencha seus dados. Ao tocar no bot\u00E3o, o WhatsApp abre com a mensagem pronta. Depois que a gente liberar, o c\u00F3digo chega no seu e-mail."),
+            ...campos(true),
+            msgErro,
+            React.createElement("button", { key: "b", onClick: pedirTeste, disabled: !okTeste || ocupado, className: "w-full flex items-center justify-center gap-2 bg-[#25D366] text-white font-bold rounded-xl py-3.5 shadow disabled:opacity-40" },
+                React.createElement(Icon, { name: "whatsapp", size: 18 }), " Pedir pelo WhatsApp"),
+            voltar,
+        ]);
+    }
+    if (passo === "compra") {
+        return Cartao([
+            React.createElement("p", { key: "t", className: "text-base font-bold text-stone-800 text-center mt-1" }, "Quase l\u00E1!"),
+            React.createElement("div", { key: "pl", className: "flex items-center justify-between rounded-xl border-2 border-[#33422e] bg-[#f4f7ee] p-3 mt-3 mb-4" },
+                React.createElement("div", null,
+                    React.createElement("div", { className: "font-bold text-stone-800" }, "Plano de " + planoEscolhido.rotulo),
+                    React.createElement("button", { onClick: () => { setPasso("escolha"); setErro(""); }, className: "text-[11px] text-[#4c6146] font-semibold underline" }, "Trocar plano")),
+                React.createElement("span", { className: "font-bold text-[#33422e]" }, planoEscolhido.preco)),
+            ...campos(false),
+            msgErro,
+            React.createElement("button", { key: "b", onClick: comprar, disabled: !okForm || ocupado, className: btn }, ocupado ? "Abrindo pagamento..." : "Pagar e ativar"),
+            React.createElement("p", { key: "p", className: "text-[11px] text-stone-400 text-center mt-2" }, "Pagamento por PIX ou cart\u00E3o pelo Mercado Pago. Sem cobran\u00E7a autom\u00E1tica: voc\u00EA s\u00F3 paga quando quiser renovar. O c\u00F3digo de ativa\u00E7\u00E3o chega no seu e-mail."),
+            voltar,
+        ]);
+    }
+    return Cartao([
+        React.createElement("p", { key: "t", className: "text-sm text-stone-500 text-center mt-1 mb-4" }, "Bem-vindo! Escolha como quer come\u00E7ar:"),
+        React.createElement("button", { key: "tg", onClick: () => { setPasso("teste"); setErro(""); }, className: "w-full rounded-2xl bg-gradient-to-r from-[#25D366] to-[#128C4A] text-white py-4 px-4 shadow-lg mb-4 text-center" },
+            React.createElement("div", { className: "text-lg font-extrabold" }, "\uD83C\uDF81 Testar gr\u00E1tis por 1 m\u00EAs"),
+            React.createElement("div", { className: "text-xs opacity-90 mt-0.5" }, "Pe\u00E7a pelo WhatsApp e a gente libera pra voc\u00EA")),
+        React.createElement("p", { key: "pl", className: "text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2" }, "Ou escolha um plano"),
+        ...cartoesPlano((id) => { setPlano(id); setPasso("compra"); setErro(""); }),
+        React.createElement("p", { key: "p", className: "text-[11px] text-stone-400 text-center mt-1" }, "Pagamento por PIX ou cart\u00E3o pelo Mercado Pago. Sem cobran\u00E7a autom\u00E1tica."),
+        React.createElement("button", { key: "j", onClick: () => { setEtapa("ja"); setErro(""); }, className: "w-full text-center text-xs text-[#4c6146] font-semibold mt-4 underline" }, "J\u00E1 tenho um c\u00F3digo"),
     ]);
 }
 async function loadList(key) {
