@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-10-16-v128-instalar";
+const APP_VERSION = "build-2026-10-16-v129-instalar";
 const APP_UPDATED_AT = "16/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -5347,6 +5347,7 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                 React.createElement(Icon, { name: "settings", size: 20 }),
                 " Configura\u00E7\u00F5es")),
         React.createElement("div", { className: "px-4 mt-4 space-y-3" },
+            React.createElement(BotaoInstalar, { className: "mb-3" }),
             React.createElement(SecaoColapsavel, { titulo: "Assinatura", aberta: secaoAberta === "assinatura", onToggle: () => alternarSecao("assinatura") },
             ativacao ? (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm overflow-hidden" },
                 React.createElement("div", { className: "px-4 py-2.5 text-xs font-semibold uppercase tracking-wide " + (valido ? "bg-[#e7ebdd] text-[#33422e]" : "bg-red-50 text-red-700") }, valido ? (ativacao.trial ? "Teste grátis ativo" : "Assinatura ativa") : "Acesso vencido"),
@@ -5374,7 +5375,6 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                         React.createElement("span", { className: "font-bold text-[#33422e]" }, pl.preco)),
                     React.createElement("div", { className: "text-[11px] text-stone-500 mt-0.5" }, pl.detalhe))),
                 React.createElement("p", { className: "text-[11px] text-stone-400" }, "Pagamento por PIX ou cartão pelo Mercado Pago. O acesso é liberado automaticamente.")),
-            React.createElement(BotaoInstalar, { className: "mt-3" }),
             React.createElement("a", { href: linkWhatsApp(valido ? "Olá! Gostaria de tirar uma dúvida sobre minha assinatura do NutriCafé." : "Olá! Meu acesso ao NutriCafé venceu e preciso de ajuda."), target: "_blank", rel: "noopener noreferrer", className: "w-full flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold mt-3" },
                 React.createElement(Icon, { name: "whatsapp", size: 17 }),
                 " ",
