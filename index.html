@@ -45,8 +45,8 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-10-16-v129-instalar";
-const APP_UPDATED_AT = "16/10/2026";
+const APP_VERSION = "build-2026-10-17-v131-razao-social";
+const APP_UPDATED_AT = "17/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
    ÍCONES — SVGs simples embutidos (sem dependência externa)
@@ -5429,7 +5429,7 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                 React.createElement("div", { className: "min-w-0" },
                     React.createElement("p", { className: "text-sm font-semibold text-stone-800" }, "Suporte e sugest\u00E3o de melhorias"),
                     React.createElement("p", { className: "text-xs text-stone-400 truncate" }, "nutricafeoficial@gmail.com"))),
-            React.createElement("p", { className: "text-center text-stone-400 text-[11px] font-medium pt-4" }, "MAA Tecnologia \u2014 CNPJ 40.967.587/0001-27"),
+            React.createElement("p", { className: "text-center text-stone-400 text-[11px] font-medium pt-4" }, "40.967.587 MARCO ANTONIO AUGUSTO \u2014 CNPJ 40.967.587/0001-27"),
             React.createElement("p", { className: "text-center text-stone-300 text-[10px] pt-1" }, APP_VERSION_DISPLAY)),
         showTabelaForm && React.createElement(TabelaCustomizadaForm, { onClose: () => setShowTabelaForm(false), onSave: (t) => { onAddTabelaCustomizada(t); setShowTabelaForm(false); } }),
         editTabela && React.createElement(TabelaCustomizadaForm, { initial: editTabela, onClose: () => setEditTabela(null), onSave: (t) => { onUpdateTabelaCustomizada(t); setEditTabela(null); } }),
@@ -5965,13 +5965,41 @@ function CotacaoCard() {
             mostrarDiag && React.createElement("p", { className: "text-[10px] text-stone-500 font-mono leading-snug break-words mt-1.5" }, debugInfo.map((l, i) => React.createElement("span", { key: i, className: "block" }, l)))))));
 }
 /* ------------------------------ SUPORTE (admin) ----------------------------- */
-// Acesso oculto: só abre se a URL tiver ?suporte=<esta senha>. Troque a
-// senha abaixo por algo só seu antes de divulgar o link de suporte.
-const SUPORTE_SENHA = "cafe-suporte-2026";
+// Acesso oculto: a tela de suporte só abre com ?suporte=1 e pede a senha.
+// A senha NÃO fica no código: quem confere é o servidor (variável SUPORTE_SENHA
+// no Netlify). Aqui ela só vive na memória da aba, depois que você digita.
+let SUPORTE_SENHA = "";
 function suporteSolicitado() {
     try {
-        return new URLSearchParams(window.location.search).get("suporte") === SUPORTE_SENHA;
+        return new URLSearchParams(window.location.search).has("suporte");
     } catch (e) { return false; }
+}
+function SuporteEntrada() {
+    const [senha, setSenha] = useState("");
+    const [erro, setErro] = useState("");
+    const [carregando, setCarregando] = useState(false);
+    const [liberado, setLiberado] = useState(false);
+    const entrar = async () => {
+        setCarregando(true); setErro("");
+        try {
+            const res = await fetch("/.netlify/functions/liberar-manual", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ senha, acao: "verificar" }),
+            });
+            if (res.ok) { SUPORTE_SENHA = senha; setLiberado(true); }
+            else if (res.status === 401) setErro("Senha incorreta.");
+            else setErro("Servidor sem senha configurada ou indispon\u00EDvel.");
+        } catch (e) { setErro("N\u00E3o foi poss\u00EDvel conectar agora."); }
+        setCarregando(false);
+    };
+    if (liberado) return React.createElement(TelaSuporte, null);
+    return React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center p-6" },
+        React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl shadow p-6" },
+            React.createElement("h1", { className: "text-lg font-bold text-stone-800 mb-3" }, "Suporte NutriCaf\u00E9"),
+            React.createElement("input", { type: "password", autoFocus: true, className: "w-full border border-stone-300 rounded-lg px-3 py-3 text-base", placeholder: "Senha do suporte", value: senha, onChange: (e) => { setSenha(e.target.value); setErro(""); }, onKeyDown: (e) => { if (e.key === "Enter" && senha) entrar(); } }),
+            erro ? React.createElement("p", { className: "text-xs text-[#a8442f] mt-2" }, erro) : null,
+            React.createElement("button", { onClick: entrar, disabled: !senha || carregando, className: "w-full mt-4 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, carregando ? "Verificando..." : "Entrar")));
 }
 function TelaLiberarAssinatura({ onBack }) {
     const [modo, setModo] = useState("liberar");
@@ -6815,7 +6843,7 @@ function App() {
                 React.createElement("button", { onClick: () => setShowTalhaoForm(true), className: "w-full flex items-center justify-center gap-2 bg-[#33422e] text-white rounded-2xl py-3.5 text-sm font-semibold active:bg-[#252f20] shadow-sm" },
                     React.createElement(Icon, { name: "plus", size: 18 }),
                     " Novo talh\u00E3o"),
-                React.createElement("p", { className: "text-center text-stone-400 text-[11px] font-medium pt-4" }, "MAA Tecnologia \u2014 CNPJ 40.967.587/0001-27"),
+                React.createElement("p", { className: "text-center text-stone-400 text-[11px] font-medium pt-4" }, "40.967.587 MARCO ANTONIO AUGUSTO \u2014 CNPJ 40.967.587/0001-27"),
                 React.createElement("p", { className: "text-center text-stone-300 text-[10px] pt-1" }, APP_VERSION_DISPLAY)))),
         showTalhaoForm && React.createElement(TalhaoForm, { tabelas: todasTabelas, onClose: () => setShowTalhaoForm(false), onSave: addTalhao }),
         editTalhao && React.createElement(TalhaoForm, { initial: editTalhao, tabelas: todasTabelas, onClose: () => setEditTalhao(null), onSave: updateTalhao }),
@@ -6837,7 +6865,7 @@ function App() {
                 setShowIrrigacaoHome(false);
             } })));
 }
-ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(suporteSolicitado() ? TelaSuporte : App, null));
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(suporteSolicitado() ? SuporteEntrada : App, null));
 
 </script>
 </body>
