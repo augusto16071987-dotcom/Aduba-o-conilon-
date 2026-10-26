@@ -45,8 +45,8 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-10-25-v132-chuva";
-const APP_UPDATED_AT = "25/10/2026";
+const APP_VERSION = "build-2026-10-26-v133-chuva";
+const APP_UPDATED_AT = "26/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
    ÍCONES — SVGs simples embutidos (sem dependência externa)
@@ -5743,6 +5743,15 @@ function PrevisaoTempoCard() {
     const [diaSelecionado, setDiaSelecionado] = useState(0);
     const [buscando, setBuscando] = useState(false);
     const [termoBusca, setTermoBusca] = useState("");
+    const [chuvaMed, setChuvaMed] = useState(() => lerChuvaCache());
+    const [chuvaMan, setChuvaMan] = useState([]);
+    useEffect(() => {
+        let vivo = true;
+        loadListSincronizado("chuva_manual").then((l) => { if (vivo) setChuvaMan(Array.isArray(l) ? l : []); });
+        const f = lerChuvaUrl();
+        if (f) buscarChuvaPlanilha(f).then((d) => { if (vivo) setChuvaMed(d); }).catch(() => { });
+        return () => { vivo = false; };
+    }, []);
     const [resultadosBusca, setResultadosBusca] = useState([]);
     const [editandoLocal, setEditandoLocal] = useState(false);
     const salvarLocal = (l) => {
@@ -5876,6 +5885,28 @@ function PrevisaoTempoCard() {
                             React.createElement("p", { className: "text-[10px] text-stone-400" }, "volume de chuva"))));
             })(),
             previsao.dias[0] && previsao.dias[0].chuvaPct >= 60 && (React.createElement("p", { className: "text-xs text-[#33628a] bg-[#e5eef5] rounded-lg px-3 py-2 mt-3" }, "\ud83d\udca7 Alta chance de chuva hoje \u2014 vale pensar duas vezes antes de pulverizar defensivo ou herbicida.")))),
+        (() => {
+            const mapa = {};
+            if (chuvaMed && chuvaMed.dias) Object.keys(chuvaMed.dias).forEach((d) => { mapa[d] = chuvaMed.dias[d]; });
+            chuvaMan.forEach((c) => { mapa[c.data] = Number(c.mm) || 0; });
+            const agora = new Date();
+            const iso = (dt) => dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
+            const hojeI = iso(agora), pref = hojeI.slice(0, 7);
+            let mes = 0, dias = 0;
+            Object.keys(mapa).forEach((d) => { if (d.indexOf(pref) === 0 && mapa[d] > 0) { mes += mapa[d]; dias++; } });
+            const tem = Object.keys(mapa).length > 0;
+            const nomeMes = MESES_NOME[agora.getMonth()];
+            const tile = (rot, val, sub) => React.createElement("div", { className: "bg-white rounded-lg p-2.5 text-center" },
+                React.createElement("p", { className: "text-lg font-bold text-[#33628a]" }, val),
+                React.createElement("p", { className: "text-[10px] text-stone-400" }, rot),
+                sub && React.createElement("p", { className: "text-[10px] text-stone-400" }, sub));
+            return React.createElement("div", { className: "bg-[#eaf2f8] border border-[#c9dced] rounded-xl p-3 mt-3" },
+                React.createElement("p", { className: "text-xs font-semibold text-[#33628a] mb-2" }, "\uD83D\uDCA7 Chuva medida na lavoura"),
+                tem ? React.createElement("div", { className: "grid grid-cols-2 gap-2" },
+                    tile("hoje", fmtMm(mapa[hojeI] || 0) + " mm"),
+                    tile("em " + nomeMes, fmtMm(mes) + " mm", dias + (dias === 1 ? " dia com chuva" : " dias com chuva")))
+                    : React.createElement("p", { className: "text-xs text-stone-500" }, "Ainda sem chuva registrada. Lance no Calend\u00E1rio (cart\u00E3o Chuva) ou conecte o pluvi\u00F4metro."));
+        })(),
         React.createElement("p", { className: "text-[10px] text-stone-300 mt-2" }, "Fonte: Open-Meteo")));
 }
 function CotacaoCard() {
