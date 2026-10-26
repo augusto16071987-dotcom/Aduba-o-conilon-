@@ -5896,16 +5896,13 @@ function PrevisaoTempoCard() {
             Object.keys(mapa).forEach((d) => { if (d.indexOf(pref) === 0 && mapa[d] > 0) { mes += mapa[d]; dias++; } });
             const tem = Object.keys(mapa).length > 0;
             const nomeMes = MESES_NOME[agora.getMonth()];
-            const tile = (rot, val, sub) => React.createElement("div", { className: "bg-white rounded-lg p-2.5 text-center" },
-                React.createElement("p", { className: "text-lg font-bold text-[#33628a]" }, val),
-                React.createElement("p", { className: "text-[10px] text-stone-400" }, rot),
-                sub && React.createElement("p", { className: "text-[10px] text-stone-400" }, sub));
-            return React.createElement("div", { className: "bg-[#eaf2f8] border border-[#c9dced] rounded-xl p-3 mt-3" },
-                React.createElement("p", { className: "text-xs font-semibold text-[#33628a] mb-2" }, "\uD83D\uDCA7 Chuva medida na lavoura"),
-                tem ? React.createElement("div", { className: "grid grid-cols-2 gap-2" },
-                    tile("hoje", fmtMm(mapa[hojeI] || 0) + " mm"),
-                    tile("em " + nomeMes, fmtMm(mes) + " mm", dias + (dias === 1 ? " dia com chuva" : " dias com chuva")))
-                    : React.createElement("p", { className: "text-xs text-stone-500" }, "Ainda sem chuva registrada. Lance no Calend\u00E1rio (cart\u00E3o Chuva) ou conecte o pluvi\u00F4metro."));
+            return React.createElement("p", { className: "text-xs text-stone-500 mt-3 flex flex-wrap items-center gap-x-1.5" },
+                React.createElement("span", null, "\uD83D\uDCA7 Chuva medida:"),
+                tem ? React.createElement(React.Fragment, null,
+                    React.createElement("span", null, "hoje ", React.createElement("b", { className: "text-[#33628a]" }, fmtMm(mapa[hojeI] || 0) + " mm")),
+                    React.createElement("span", null, "\u00B7"),
+                    React.createElement("span", null, nomeMes.toLowerCase() + " ", React.createElement("b", { className: "text-[#33628a]" }, fmtMm(mes) + " mm"), " (" + dias + (dias === 1 ? " dia)" : " dias)")))
+                    : React.createElement("span", { className: "text-stone-400" }, "sem registro (lance no Calend\u00E1rio)"));
         })(),
         React.createElement("p", { className: "text-[10px] text-stone-300 mt-2" }, "Fonte: Open-Meteo")));
 }
