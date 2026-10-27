@@ -5911,6 +5911,37 @@ function PrevisaoTempoCard() {
         })(),
         React.createElement("p", { className: "text-[10px] text-stone-300 mt-2" }, "Fonte: Open-Meteo")));
 }
+function ResumoLavouraCard({ talhoes }) {
+    const lista = Array.isArray(talhoes) ? talhoes : [];
+    if (lista.length === 0) return null;
+    const porCultura = {};
+    lista.forEach((t) => {
+        const c = culturaDoTalhao(t);
+        if (!porCultura[c.id]) porCultura[c.id] = { info: c, talhoes: 0, area: 0, plantas: 0 };
+        const g = porCultura[c.id];
+        g.talhoes += 1;
+        g.area += Number(t.area) || 0;
+        g.plantas += Number(t.numPlantas) || 0;
+    });
+    const grupos = Object.values(porCultura).sort((x, y) => y.area - x.area);
+    const areaTotal = grupos.reduce((s, g) => s + g.area, 0);
+    const plantasTotal = grupos.reduce((s, g) => s + g.plantas, 0);
+    const fmtInt = (n) => Math.round(n).toLocaleString("pt-BR");
+    return React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-4" },
+        React.createElement("p", { className: "text-sm font-bold text-stone-700 mb-3" }, "\uD83C\uDF31 Resumo da lavoura"),
+        React.createElement("div", { className: "grid grid-cols-2 gap-2" },
+            React.createElement("div", { className: "bg-[#eef2e8] rounded-xl p-3 text-center" },
+                React.createElement("p", { className: "text-xl font-bold text-[#33422e]" }, fmtBR(areaTotal, 2), " ha"),
+                React.createElement("p", { className: "text-[11px] text-stone-500" }, "\u00E1rea total \u00B7 " + lista.length + (lista.length === 1 ? " talh\u00E3o" : " talh\u00F5es"))),
+            React.createElement("div", { className: "bg-[#eef2e8] rounded-xl p-3 text-center" },
+                React.createElement("p", { className: "text-xl font-bold text-[#33422e]" }, fmtInt(plantasTotal)),
+                React.createElement("p", { className: "text-[11px] text-stone-500" }, "p\u00E9s de planta no total"))),
+        React.createElement("div", { className: "mt-3 divide-y divide-stone-100" }, grupos.map((g) => React.createElement("div", { key: g.info.id, className: "py-2 flex items-center justify-between gap-2" },
+            React.createElement("span", { className: "text-sm text-stone-700" }, g.info.emoji + " " + g.info.nome, React.createElement("span", { className: "block text-[11px] text-stone-400" }, g.talhoes + (g.talhoes === 1 ? " talh\u00E3o" : " talh\u00F5es"))),
+            React.createElement("span", { className: "text-right text-sm" },
+                React.createElement("b", { className: "text-stone-800" }, fmtBR(g.area, 2) + " ha"),
+                React.createElement("span", { className: "block text-[11px] text-stone-500" }, g.plantas > 0 ? fmtInt(g.plantas) + " p\u00E9s" : "p\u00E9s n\u00E3o informados"))))));
+}
 function CotacaoCard() {
     const [cot, setCot] = useState(null);
     const [status, setStatus] = useState("carregando");
@@ -7044,6 +7075,7 @@ function App() {
                     " Ativar avisos de atraso neste aparelho")),
                 React.createElement(CotacaoCard, null),
                 React.createElement(PrevisaoTempoCard, null),
+                React.createElement(ResumoLavouraCard, { talhoes: talhoes }),
                 React.createElement("div", { className: "grid grid-cols-2 gap-3" },
                     React.createElement(AcaoTile, { icon: "calculator", cor: "#33422e", corFundo: "#e7ebdd", label: "Calcular dose", onClick: () => setShowCalculadoras(true) }),
                     React.createElement(AcaoTile, { icon: "clipboard", cor: "#a8442f", corFundo: "#fbe9e6", label: "Financeiro", onClick: () => setShowCompras(true) }),
