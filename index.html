@@ -6754,6 +6754,9 @@ function App() {
     const [loaded, setLoaded] = useState(false);
     const [selectedId, setSelectedId] = useState(null);
     const [showTalhaoForm, setShowTalhaoForm] = useState(false);
+    const [abaInicio, setAbaInicioState] = useState(() => { try { const v = localStorage.getItem(STORAGE_PREFIX + "aba_inicio"); return ["inicio", "cafe", "tempo", "lavoura"].indexOf(v) >= 0 ? v : "inicio"; } catch (e) { return "inicio"; } });
+    const setAbaInicio = (v) => { setAbaInicioState(v); try { localStorage.setItem(STORAGE_PREFIX + "aba_inicio", v); } catch (e) { } };
+    const aba = abaInicio;
     const [editTalhao, setEditTalhao] = useState(null);
     const [showCalculadoras, setShowCalculadoras] = useState(false);
     const [showConfiguracoes, setShowConfiguracoes] = useState(false);
@@ -7070,11 +7073,14 @@ function App() {
                             React.createElement(Icon, { name: "chat", size: 20 })),
                         React.createElement("button", { onClick: () => setShowConfiguracoes(true), className: "text-[#cdd7c4]", "aria-label": "Configura\u00E7\u00F5es" },
                             React.createElement(Icon, { name: "settings", size: 20 })))),
-                React.createElement("p", { className: "text-[#cdd7c4] text-sm mt-1" }, "Controle de talh\u00F5es, an\u00E1lises, pragas e aduba\u00E7\u00E3o da sua lavoura")),
+                React.createElement("p", { className: "text-[#cdd7c4] text-sm mt-1" }, "Controle de talh\u00F5es, an\u00E1lises, pragas e aduba\u00E7\u00E3o da sua lavoura"),
+                React.createElement("div", { className: "flex mt-3 -mx-1", role: "tablist" }, [["inicio", "\uD83C\uDFE0", "In\u00EDcio"], ["cafe", "\u2615", "Caf\u00E9"], ["tempo", "\uD83C\uDF24\uFE0F", "Tempo"], ["lavoura", "\uD83C\uDF31", "Lavoura"]].map(([id, em, nome]) => React.createElement("button", { key: id, type: "button", role: "tab", "aria-selected": aba === id, onClick: () => setAbaInicio(id), className: "flex-1 flex flex-col items-center gap-0.5 pt-1 pb-1.5 border-b-[3px] relative " + (aba === id ? "border-white text-white" : "border-transparent text-[#a9b79e]") },
+                    React.createElement("span", { className: "text-lg leading-none" }, em),
+                    React.createElement("span", { className: "text-[11px] font-semibold" }, nome),
+                    id === "inicio" && atrasados.length > 0 && React.createElement("span", { className: "absolute top-0 right-[22%] w-2.5 h-2.5 rounded-full bg-[#e0573d]" }))))),
             React.createElement("div", { className: "px-4 mt-4 space-y-3" },
                 React.createElement(AvisoVencimento, null),
-                React.createElement(SecaoRecolhivel, { id: "calendario", titulo: "\uD83D\uDCC5 Calend\u00E1rio e avisos", abertaPadrao: atrasados.length > 0 || paraHoje.length > 0, resumo: (atrasados.length + paraHoje.length === 0) ? "Nada atrasado nem agendado para hoje" : (atrasados.length ? atrasados.length + (atrasados.length === 1 ? " atrasada" : " atrasadas") : "") + (atrasados.length && paraHoje.length ? " \u00B7 " : "") + (paraHoje.length ? paraHoje.length + " para hoje" : "") },
-                    React.createElement("div", { className: "space-y-3" },
+                aba === "inicio" && React.createElement("div", { className: "space-y-3" },
                 atrasados.length > 0 && (React.createElement("button", { onClick: () => setShowCalendario(true), className: "w-full text-left bg-[#fdf0e6] border border-[#f0d5c4] rounded-2xl p-3 active:bg-[#fae5d6]" },
                     React.createElement("p", { className: "text-xs font-bold text-[#a8442f] mb-1 flex items-center gap-1" },
                         React.createElement(Icon, { name: "alert", size: 13 }),
@@ -7091,16 +7097,14 @@ function App() {
                         "\u2022 ", a.talhaoNome, " \u2014 ", a.produto || (FORMAS_APLICACAO.find(([k]) => k === a.forma) || [null, a.forma])[1]))),
                     paraHoje.length > 3 && React.createElement("p", { className: "text-xs text-[#2d5a7a]" }, "\u2022 e mais ", paraHoje.length - 3, "..."),
                     React.createElement("p", { className: "text-[11px] text-[#2d5a7a] mt-1 font-semibold" }, "Toque para ver o calend\u00E1rio \u2192"))),
-                        React.createElement("button", { onClick: () => setShowCalendario(true), className: "w-full flex items-center justify-center gap-2 bg-[#e5eef5] text-[#33628a] rounded-xl py-2.5 text-sm font-semibold" },
-                            React.createElement(Icon, { name: "calendar", size: 16 }),
-                            " Abrir o calend\u00E1rio"))),
-                permissaoNotificacao === "default" && (React.createElement("button", { onClick: pedirPermissaoNotificacao, className: "w-full flex items-center justify-center gap-2 border border-dashed border-[#9fb08f] text-[#33422e] rounded-xl py-2.5 text-xs font-semibold" },
+                        null),
+                aba === "inicio" && permissaoNotificacao === "default" && (React.createElement("button", { onClick: pedirPermissaoNotificacao, className: "w-full flex items-center justify-center gap-2 border border-dashed border-[#9fb08f] text-[#33422e] rounded-xl py-2.5 text-xs font-semibold" },
                     React.createElement(Icon, { name: "alert", size: 14 }),
                     " Ativar avisos de atraso neste aparelho")),
-                React.createElement(SecaoRecolhivel, { id: "cotacao", titulo: "\u2615 Pre\u00E7o do caf\u00E9", abertaPadrao: true }, React.createElement(CotacaoCard, null)),
-                React.createElement(SecaoRecolhivel, { id: "previsao", titulo: "\uD83C\uDF24\uFE0F Previs\u00E3o do tempo e chuva", resumo: "Toque para ver a previs\u00E3o e a chuva medida" }, React.createElement(PrevisaoTempoCard, null)),
-                (talhoes || []).length > 0 && React.createElement(SecaoRecolhivel, { id: "resumo", titulo: "\uD83C\uDF31 Resumo da lavoura", resumo: fmtBR((talhoes || []).reduce((t, x) => t + (Number(x.area) || 0), 0), 2) + " ha \u00B7 " + Math.round((talhoes || []).reduce((t, x) => t + (Number(x.numPlantas) || 0), 0)).toLocaleString("pt-BR") + " p\u00E9s" }, React.createElement(ResumoLavouraCard, { talhoes: talhoes })),
-                React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+                aba === "cafe" && React.createElement(CotacaoCard, null),
+                aba === "tempo" && React.createElement(PrevisaoTempoCard, null),
+                aba === "lavoura" && talhoes.length > 0 && React.createElement(ResumoLavouraCard, { talhoes: talhoes }),
+                aba === "inicio" && React.createElement("div", { className: "grid grid-cols-2 gap-3" },
                     React.createElement(AcaoTile, { icon: "calculator", cor: "#33422e", corFundo: "#e7ebdd", label: "Calcular dose", onClick: () => setShowCalculadoras(true) }),
                     React.createElement(AcaoTile, { icon: "clipboard", cor: "#a8442f", corFundo: "#fbe9e6", label: "Financeiro", onClick: () => setShowCompras(true) }),
                     React.createElement(AcaoTile, { icon: "calendar", cor: "#33628a", corFundo: "#e5eef5", label: "Calend\u00E1rio", onClick: () => setShowCalendario(true) }),
@@ -7111,7 +7115,7 @@ function App() {
                     // produto acabando, zerado, ou insuficiente pro que já
                     // está agendado — pra não poluir sem motivo
                     const alertas = calcularEstoque(compras, adubacoes, defensivos, despesas, talhoes, agendamentos).filter((i) => precisaAtencaoEstoque(i));
-                    if (alertas.length === 0) return null;
+                    if (aba !== "inicio" || alertas.length === 0) return null;
                     const msgDoItem = (i) => {
                         if (statusEstoque(i) === "acabou") return "\u2022 " + i.produto + " \u2014 acabou";
                         if (statusEstoque(i) === "baixo") return "\u2022 " + i.produto + " \u2014 restam " + fmtBR(i.saldo, 1) + " " + i.unidade;
@@ -7125,13 +7129,12 @@ function App() {
                         alertas.length > 3 && React.createElement("p", { className: "text-xs text-[#8a3a29]" }, "\u2022 e mais ", alertas.length - 3, "..."),
                         React.createElement("p", { className: "text-[11px] text-[#a8442f] mt-1 font-semibold" }, "Toque para ver o estoque \u2192"));
                 })(),
-                React.createElement(SecaoRecolhivel, { id: "talhoes", titulo: "\uD83C\uDF3F Meus talh\u00F5es", abertaPadrao: talhoes.length === 0, resumo: talhoes.length + (talhoes.length === 1 ? " talh\u00E3o cadastrado" : " talh\u00F5es cadastrados") },
-                    React.createElement("div", { className: "space-y-3" },
+                aba === "lavoura" && React.createElement("div", { className: "space-y-3" },
                 talhoes.length === 0 && (React.createElement("p", { className: "text-center text-stone-400 text-sm py-10" }, "Cadastre seu primeiro talh\u00E3o para come\u00E7ar o controle de aduba\u00E7\u00E3o.")),
                 talhoes.map((t) => (React.createElement(TalhaoCard, { key: t.id, talhao: t, ultimaAnalise: (analises[t.id] || [])[0], onOpen: () => setSelectedId(t.id), onEdit: () => setEditTalhao(t), onDelete: () => deleteTalhao(t.id) }))),
                 React.createElement("button", { onClick: () => setShowTalhaoForm(true), className: "w-full flex items-center justify-center gap-2 bg-[#33422e] text-white rounded-2xl py-3.5 text-sm font-semibold active:bg-[#252f20] shadow-sm" },
                     React.createElement(Icon, { name: "plus", size: 18 }),
-                    " Novo talh\u00E3o"))),
+                    " Novo talh\u00E3o")),
                 React.createElement("p", { className: "text-center text-stone-400 text-[11px] font-medium pt-4" }, "40.967.587 MARCO ANTONIO AUGUSTO \u2014 CNPJ 40.967.587/0001-27"),
                 React.createElement("p", { className: "text-center text-stone-300 text-[10px] pt-1" }, APP_VERSION_DISPLAY)))),
         showTalhaoForm && React.createElement(TalhaoForm, { tabelas: todasTabelas, onClose: () => setShowTalhaoForm(false), onSave: addTalhao }),
