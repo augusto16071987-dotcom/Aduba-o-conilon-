@@ -7074,8 +7074,13 @@ function App() {
                         React.createElement("button", { onClick: () => setShowConfiguracoes(true), className: "text-[#cdd7c4]", "aria-label": "Configura\u00E7\u00F5es" },
                             React.createElement(Icon, { name: "settings", size: 20 })))),
                 React.createElement("p", { className: "text-[#cdd7c4] text-sm mt-1" }, "Controle de talh\u00F5es, an\u00E1lises, pragas e aduba\u00E7\u00E3o da sua lavoura"),
-                React.createElement("div", { className: "flex mt-3 -mx-1", role: "tablist" }, [["inicio", "\uD83C\uDFE0", "In\u00EDcio"], ["cafe", "\u2615", "Caf\u00E9"], ["tempo", "\uD83C\uDF24\uFE0F", "Tempo"], ["lavoura", "\uD83C\uDF31", "Lavoura"]].map(([id, em, nome]) => React.createElement("button", { key: id, type: "button", role: "tab", "aria-selected": aba === id, onClick: () => setAbaInicio(id), className: "flex-1 flex flex-col items-center gap-0.5 pt-1 pb-1.5 border-b-[3px] relative " + (aba === id ? "border-white text-white" : "border-transparent text-[#a9b79e]") },
-                    React.createElement("span", { className: "text-lg leading-none" }, em),
+                React.createElement("div", { className: "flex mt-3 -mx-1", role: "tablist" }, [["inicio", "\uD83C\uDFE0", "In\u00EDcio"], ["cafe", "BOLSA", "Pre\u00E7o"], ["tempo", "\uD83C\uDF24\uFE0F", "Tempo"], ["lavoura", "\uD83C\uDF31", "Lavoura"]].map(([id, em, nome]) => React.createElement("button", { key: id, type: "button", role: "tab", "aria-selected": aba === id, onClick: () => setAbaInicio(id), className: "flex-1 flex flex-col items-center gap-0.5 pt-1 pb-1.5 border-b-[3px] relative " + (aba === id ? "border-white text-white" : "border-transparent text-[#a9b79e]") },
+                    React.createElement("span", { className: "text-lg leading-none h-[27px] flex items-center" }, em === "BOLSA" ? React.createElement("svg", { width: 32, height: 27, viewBox: "0 0 26 22", "aria-hidden": "true" },
+                        React.createElement("g", { transform: "rotate(-35 10 12)" },
+                            React.createElement("ellipse", { cx: 10, cy: 12, rx: 8, ry: 5.6, fill: "#8a5a36" }),
+                            React.createElement("path", { d: "M2.5 12 C6 9.5 8 14.5 11.5 12 S16 10 17.5 12", stroke: "#e8d3b8", strokeWidth: 1.4, fill: "none", strokeLinecap: "round" })),
+                        React.createElement("circle", { cx: 19.5, cy: 7, r: 6, fill: "#e7b93c" }),
+                        React.createElement("text", { x: 19.5, y: 10.4, textAnchor: "middle", fontSize: 9, fontWeight: 700, fill: "#5a3d00", fontFamily: "sans-serif" }, "$")) : em),
                     React.createElement("span", { className: "text-[11px] font-semibold" }, nome),
                     id === "inicio" && atrasados.length > 0 && React.createElement("span", { className: "absolute top-0 right-[22%] w-2.5 h-2.5 rounded-full bg-[#e0573d]" }))))),
             React.createElement("div", { className: "px-4 mt-4 space-y-3" },
@@ -7108,8 +7113,7 @@ function App() {
                     React.createElement(AcaoTile, { icon: "calculator", cor: "#33422e", corFundo: "#e7ebdd", label: "Calcular dose", onClick: () => setShowCalculadoras(true) }),
                     React.createElement(AcaoTile, { icon: "clipboard", cor: "#a8442f", corFundo: "#fbe9e6", label: "Financeiro", onClick: () => setShowCompras(true) }),
                     React.createElement(AcaoTile, { icon: "calendar", cor: "#33628a", corFundo: "#e5eef5", label: "Calend\u00E1rio", onClick: () => setShowCalendario(true) }),
-                    React.createElement(AcaoTile, { icon: "history", cor: "#8a6d3b", corFundo: "#f2e8d8", label: "Relat\u00F3rio", onClick: () => setShowRelatorio(true) }),
-                    React.createElement(AcaoTile, { icon: "droplet", cor: "#33628a", corFundo: "#e5eef5", label: "Irriga\u00E7\u00E3o", onClick: () => setShowIrrigacaoHome(true), full: true })),
+                    React.createElement(AcaoTile, { icon: "history", cor: "#8a6d3b", corFundo: "#f2e8d8", label: "Relat\u00F3rio", onClick: () => setShowRelatorio(true) })),
                 (() => {
                     // Aviso de estoque na tela inicial: só aparece quando tem
                     // produto acabando, zerado, ou insuficiente pro que já
