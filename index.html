@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-10-28-v136-bula";
+const APP_VERSION = "build-2026-10-28-v137-sync";
 const APP_UPDATED_AT = "28/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -1089,6 +1089,16 @@ async function loadList(key) {
         return [];
     }
 }
+/* Controle do que já foi pra nuvem: pra cada lista guarda QUANDO mudou aqui
+   (local) e QUANDO foi confirmado na nuvem (nuvem). Se local > nuvem, tem
+   alteração que ainda não subiu (ex: estava sem internet) — a sincronização
+   automática manda de novo e o app nunca sobrescreve isso com dado antigo. */
+function syncMetaGet(key) {
+    try { const r = localStorage.getItem(STORAGE_PREFIX + "sync_meta_" + key); return r ? JSON.parse(r) : null; } catch (e) { return null; }
+}
+function syncMetaSet(key, meta) {
+    try { localStorage.setItem(STORAGE_PREFIX + "sync_meta_" + key, JSON.stringify(meta)); } catch (e) { }
+}
 async function saveList(key, list) {
     try {
         localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(list));
@@ -1096,7 +1106,17 @@ async function saveList(key, list) {
     catch (e) {
         console.error("Erro ao salvar", key, e);
     }
-    salvarNaNuvem(key, list); // não bloqueia — roda em segundo plano
+    const em = new Date().toISOString();
+    const antes = syncMetaGet(key) || {};
+    syncMetaSet(key, { local: em, nuvem: antes.nuvem || "" });
+    salvarNaNuvem(key, list, em).then((ok) => {
+        if (ok) { const m = syncMetaGet(key) || {}; syncMetaSet(key, { local: m.local || em, nuvem: em > (m.nuvem || "") ? em : m.nuvem }); }
+    }); // não bloqueia — roda em segundo plano
+}
+// Grava só no aparelho (usado quando o dado veio da nuvem) — não manda de volta.
+function saveListSoLocal(key, list, em) {
+    try { localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(list)); } catch (e) { console.error("Erro ao salvar", key, e); }
+    syncMetaSet(key, { local: em, nuvem: em });
 }
 
 /* ---------------------------------------------------------------
@@ -1368,7 +1388,7 @@ function bulaAbrir(dataUrl, nome) {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-async function carregarDaNuvem(chave) {
+async function carregarDaNuvemComData(chave) {
     if (!syncAtivo()) return null;
     try {
         const res = await fetch(firestoreDocUrl(chave));
@@ -1376,28 +1396,47 @@ async function carregarDaNuvem(chave) {
         const json = await res.json();
         const texto = json && json.fields && json.fields.itens && json.fields.itens.stringValue;
         if (!texto) return null;
-        return JSON.parse(texto);
+        const em = (json.fields.atualizadoEm && json.fields.atualizadoEm.stringValue) || "";
+        return { dados: JSON.parse(texto), em };
     } catch (e) {
         console.error("Erro ao ler da nuvem", chave, e);
         return null;
     }
 }
-async function salvarNaNuvem(chave, dados) {
-    if (!syncAtivo()) return;
+async function carregarDaNuvem(chave) {
+    const r = await carregarDaNuvemComData(chave);
+    return r ? r.dados : null;
+}
+async function salvarNaNuvem(chave, dados, em) {
+    if (!syncAtivo()) return false;
     try {
-        await fetch(firestoreDocUrl(chave) + "?updateMask.fieldPaths=itens&updateMask.fieldPaths=atualizadoEm", {
+        const res = await fetch(firestoreDocUrl(chave) + "?updateMask.fieldPaths=itens&updateMask.fieldPaths=atualizadoEm", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 fields: {
                     itens: { stringValue: JSON.stringify(dados) },
-                    atualizadoEm: { stringValue: new Date().toISOString() },
+                    atualizadoEm: { stringValue: em || new Date().toISOString() },
                 },
             }),
         });
+        return !!res.ok;
     } catch (e) {
         console.error("Erro ao sincronizar na nuvem", chave, e);
+        return false;
     }
+}
+// Só o "quando mudou" de um documento na nuvem (leve — não baixa os dados).
+// Devolve { em } (em vazio se ainda não existe) ou null se não deu pra consultar.
+async function nuvemQuandoMudou(chave) {
+    if (!syncAtivo()) return null;
+    try {
+        const res = await fetch(firestoreDocUrl(chave) + "?mask.fieldPaths=atualizadoEm");
+        if (res.status === 404) return { em: "" };
+        if (!res.ok) return null;
+        const json = await res.json();
+        return { em: (json && json.fields && json.fields.atualizadoEm && json.fields.atualizadoEm.stringValue) || "" };
+    } catch (e) { return null; }
 }
 
 // Igual carregarDaNuvem, mas pra QUALQUER id de sincronização — usado só
@@ -1423,17 +1462,73 @@ async function carregarDaNuvemDe(syncId, chave) {
 async function loadListSincronizado(key) {
     const local = await loadList(key);
     if (!syncAtivo()) return local;
-    const daNuvem = await carregarDaNuvem(key);
-    if (daNuvem == null) return local;
-    // Sem timestamp confiável pra comparar item a item — por segurança,
-    // se a nuvem tiver dado e o local estiver vazio, usa a nuvem
-    // (caso comum: celular novo). Se os dois tiverem dado, prioriza
-    // a nuvem (é o "estado combinado" mais recente entre aparelhos).
-    if (Array.isArray(daNuvem) && daNuvem.length > 0) {
-        await saveList(key, daNuvem);
-        return daNuvem;
+    const r = await carregarDaNuvemComData(key);
+    const meta = syncMetaGet(key);
+    if (r == null) {
+        // nuvem sem esse dado (ou sem internet): se tem alteração pendente, tenta mandar
+        if (meta && meta.local && meta.local > (meta.nuvem || "")) {
+            salvarNaNuvem(key, local, meta.local).then((ok) => { if (ok) syncMetaSet(key, { local: meta.local, nuvem: meta.local }); });
+        }
+        return local;
+    }
+    // Alteração daqui que ainda não subiu (ex: ficou sem internet) e é mais
+    // nova que a nuvem: mantém a daqui e manda de novo — nunca sobrescreve
+    // com dado antigo.
+    const pendente = meta && meta.local && meta.local > (meta.nuvem || "");
+    if (pendente && meta.local >= r.em) {
+        salvarNaNuvem(key, local, meta.local).then((ok) => { if (ok) syncMetaSet(key, { local: meta.local, nuvem: meta.local }); });
+        return local;
+    }
+    // Senão, a nuvem (estado mais recente entre aparelhos) prevalece quando tem dado.
+    if (Array.isArray(r.dados) && r.dados.length > 0) {
+        saveListSoLocal(key, r.dados, r.em || new Date().toISOString());
+        return r.dados;
     }
     return local;
+}
+/* SINCRONIZAÇÃO AUTOMÁTICA — roda enquanto o app está aberto (a cada X
+   minutos, ao voltar pro app e quando a internet volta). Faz duas coisas:
+   1) manda pra nuvem o que ficou pendente; 2) avisa se outro aparelho
+   salvou algo mais novo (não troca os dados sozinho, pra não atrapalhar
+   quem está digitando). */
+const SYNC_OPCOES = [[0, "Desligada"], [5, "A cada 5 minutos"], [15, "A cada 15 minutos"], [30, "A cada 30 minutos"], [60, "A cada 1 hora"], [360, "A cada 6 horas"], [1440, "Uma vez por dia"]];
+function getSyncIntervalo() {
+    try { const v = localStorage.getItem(STORAGE_PREFIX + "sync_intervalo"); if (v !== null) return Number(v) || 0; } catch (e) { }
+    return 15;
+}
+function setSyncIntervalo(min) { try { localStorage.setItem(STORAGE_PREFIX + "sync_intervalo", String(min)); } catch (e) { } }
+function getSyncUltima() { try { return localStorage.getItem(STORAGE_PREFIX + "sync_ultima") || ""; } catch (e) { return ""; } }
+const SYNC_CHAVES = ["talhoes", "analises_por_talhao", "adubacoes_por_talhao", "ocorrencias_por_talhao", "defensivos_por_talhao", "receitas_por_talhao", "despesas_por_talhao", "agendamentos_por_talhao", "compras", "tabelas_customizadas", "chuva_manual"];
+async function sincronizarAgora() {
+    if (!syncAtivo()) return { ok: false, erro: "sem-sync" };
+    let enviados = 0, falhas = 0;
+    const novos = [];
+    for (const key of SYNC_CHAVES) {
+        const q = await nuvemQuandoMudou(key);
+        if (q == null) { falhas++; continue; }
+        const meta = syncMetaGet(key);
+        if (!meta) {
+            // nunca carregada/gravada neste aparelho: só marca o ponto de partida
+            if (q.em) { syncMetaSet(key, { local: q.em, nuvem: q.em }); continue; }
+            // nuvem sem nada e este aparelho já tem dados: envia pela primeira vez
+            const dados0 = await loadList(key);
+            if (Array.isArray(dados0) && dados0.length) {
+                const em0 = new Date().toISOString();
+                if (await salvarNaNuvem(key, dados0, em0)) { syncMetaSet(key, { local: em0, nuvem: em0 }); enviados++; } else falhas++;
+            }
+            continue;
+        }
+        const pendente = meta.local && meta.local > (meta.nuvem || "");
+        if (pendente && (!q.em || meta.local >= q.em)) {
+            const dados = await loadList(key);
+            const ok = await salvarNaNuvem(key, dados, meta.local);
+            if (ok) { syncMetaSet(key, { local: meta.local, nuvem: meta.local }); enviados++; } else falhas++;
+        } else if (q.em && q.em > (meta.nuvem || "")) {
+            novos.push(key);
+        }
+    }
+    try { localStorage.setItem(STORAGE_PREFIX + "sync_ultima", new Date().toISOString()); } catch (e) { }
+    return { ok: falhas === 0, enviados, novos, falhas };
 }
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -5680,7 +5775,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
         ] },
         { id: "dados", titulo: "Seus dados e backup", itens: [
             ["Salvamento", "Tudo \u00E9 salvo sozinho no celular, sem bot\u00E3o de salvar \u2014 assim que voc\u00EA confirma um cadastro, j\u00E1 fica gravado."],
-            ["Sincroniza\u00E7\u00E3o", "Se ativa (em {{Configura\u00E7\u00F5es|configuracoes}}), os dados v\u00E3o pra nuvem automaticamente, sem precisar fazer nada. Anote seu ID de sincroniza\u00E7\u00E3o \u2014 \u00E9 ele que recupera tudo sozinho num celular novo, s\u00F3 de informar o mesmo c\u00F3digo."],
+            ["Sincroniza\u00E7\u00E3o", "Se ativa (em {{Configura\u00E7\u00F5es|configuracoes}}), os dados v\u00E3o pra nuvem automaticamente, sem precisar fazer nada. Voc\u00EA escolhe de quanto em quanto tempo o app confere a nuvem (padr\u00E3o: 15 minutos) e pode tocar em \u201CSincronizar agora\u201D. Roda enquanto o app est\u00E1 aberto. Anote seu ID de sincroniza\u00E7\u00E3o \u2014 \u00E9 ele que recupera tudo sozinho num celular novo, s\u00F3 de informar o mesmo c\u00F3digo."],
             ["Backup manual", "Em {{Configura\u00E7\u00F5es|configuracoes}} d\u00E1 pra baixar um arquivo .json com todos os dados e restaurar depois \u2014 \u00FAtil como uma segunda camada de seguran\u00E7a al\u00E9m da sincroniza\u00E7\u00E3o, ou se voc\u00EA n\u00E3o quiser usar a nuvem."],
             ["Configura\u00E7\u00F5es organizadas", "A tela de {{Configura\u00E7\u00F5es|configuracoes}} \u00E9 dividida em se\u00E7\u00F5es que abrem e fecham (Assinatura, Sincroniza\u00E7\u00E3o, Backup, Tabelas de aduba\u00E7\u00E3o) \u2014 toque no t\u00EDtulo de cada uma pra expandir e ver o conte\u00FAdo."],
             ["Bot\u00E3o de voltar do celular", "Agora navega tela por tela dentro do app (igual app nativo) em vez de fechar direto \u2014 s\u00F3 sai de verdade quando voc\u00EA j\u00E1 est\u00E1 na tela inicial."],
@@ -5736,6 +5831,9 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
     const [syncIdEditando, setSyncIdEditando] = useState(getSyncId() || "");
     const [backupPendente, setBackupPendente] = useState(null);
     const [mensagemSync, setMensagemSync] = useState("");
+    const [syncIntervaloSel, setSyncIntervaloSel] = useState(getSyncIntervalo());
+    const [sincronizando, setSincronizando] = useState(false);
+    const [syncUltimaTxt, setSyncUltimaTxt] = useState(getSyncUltima() ? new Date(getSyncUltima()).toLocaleString("pt-BR") : "");
     const [showTabelaForm, setShowTabelaForm] = useState(false);
     const [editTabela, setEditTabela] = useState(null);
     const [tabelaParaExcluir, setTabelaParaExcluir] = useState(null);
@@ -5854,6 +5952,27 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                     className: "w-full flex items-center justify-center gap-2 bg-[#33422e] text-white rounded-lg py-3 text-sm font-semibold active:bg-[#252f20]"
                 }, React.createElement(Icon, { name: "check", size: 16 }), " Usar este ID"),
                 mensagemSync && React.createElement("p", { className: "text-xs text-[#4c6146] mt-2" }, mensagemSync),
+                React.createElement("div", { className: "mt-4 pt-4 border-t border-stone-200" },
+                    React.createElement("label", { className: "block text-xs font-semibold tracking-wide text-stone-500 uppercase mb-1" }, "Sincronizar automaticamente"),
+                    React.createElement("select", { className: inputCls + " mb-2", value: syncIntervaloSel, onChange: (e) => { const v = Number(e.target.value); setSyncIntervaloSel(v); setSyncIntervalo(v); window.dispatchEvent(new Event("nutricafe-sync-config")); } },
+                        SYNC_OPCOES.map(([v, n]) => React.createElement("option", { key: v, value: v }, n))),
+                    React.createElement("p", { className: "text-xs text-stone-500 mb-2" }, "\u00DAltima sincroniza\u00E7\u00E3o: " + (syncUltimaTxt || "ainda n\u00E3o")),
+                    React.createElement("button", {
+                        disabled: sincronizando || !syncAtivo(),
+                        onClick: async () => {
+                            setSincronizando(true);
+                            const r = await sincronizarAgora();
+                            setSincronizando(false);
+                            const u = getSyncUltima();
+                            setSyncUltimaTxt(u ? new Date(u).toLocaleString("pt-BR") : "");
+                            if (!r.ok && r.erro) setMensagemSync("Ative a sincroniza\u00E7\u00E3o com um ID primeiro.");
+                            else if (!r.ok) setMensagemSync("N\u00E3o consegui falar com a nuvem agora (internet?). Tento de novo depois.");
+                            else if (r.novos && r.novos.length) { setMensagemSync("Tem dados mais novos de outro aparelho. Atualizando..."); setTimeout(() => onDadosRestaurados(), 800); }
+                            else setMensagemSync(r.enviados ? "Pronto! Enviei " + r.enviados + " altera\u00E7\u00E3o(\u00F5es) pendente(s) pra nuvem." : "Tudo certo \u2014 nuvem e celular j\u00E1 est\u00E3o iguais.");
+                        },
+                        className: "w-full flex items-center justify-center gap-2 border border-[#33422e] text-[#33422e] rounded-lg py-3 text-sm font-semibold active:bg-stone-100 disabled:opacity-50"
+                    }, sincronizando ? "Sincronizando..." : "Sincronizar agora"),
+                    React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "Funciona enquanto o app est\u00E1 aberto (ou ao voltar pra ele e quando a internet volta). Tudo que voc\u00EA salva j\u00E1 vai pra nuvem na hora; isso aqui reenvia o que ficou pendente e avisa se outro aparelho salvou algo mais novo.")),
                 React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "Anote esse ID em algum lugar seguro (foto, papel) \u2014 \u00E9 ele que liga seus dados a este app em qualquer aparelho.")),
             React.createElement(SecaoColapsavel, { titulo: "Backup dos dados", aberta: secaoAberta === "backup", onToggle: () => alternarSecao("backup") },
                 React.createElement("p", { className: "text-sm text-stone-600 mb-3" }, "Todos os dados do app (talh\u00F5es, an\u00E1lises, aduba\u00E7\u00F5es, pragas, compras, financeiro) ficam salvos s\u00F3 neste celular/navegador. Se desinstalar o app, trocar de celular ou limpar os dados do navegador, essas informa\u00E7\u00F5es se perdem \u2014 a menos que voc\u00EA tenha um backup salvo."),
@@ -7152,6 +7271,33 @@ function App() {
         setCompras(cp);
         setTabelasCustomizadas(tc);
     }, []);
+    const [syncNovos, setSyncNovos] = useState(false);
+    const [syncIntervaloApp, setSyncIntervaloApp] = useState(getSyncIntervalo());
+    useEffect(() => {
+        const aoMudar = () => setSyncIntervaloApp(getSyncIntervalo());
+        window.addEventListener("nutricafe-sync-config", aoMudar);
+        return () => window.removeEventListener("nutricafe-sync-config", aoMudar);
+    }, []);
+    useEffect(() => {
+        if (!loaded || !syncIntervaloApp || !syncAtivo()) return;
+        let vivo = true;
+        const rodar = async () => {
+            if (!navigator.onLine) return;
+            const r = await sincronizarAgora();
+            if (vivo && r && r.novos && r.novos.length) setSyncNovos(true);
+        };
+        const ms = syncIntervaloApp * 60000;
+        const t = setInterval(rodar, ms);
+        const aoVoltar = () => {
+            if (document.visibilityState !== "visible") return;
+            const ult = Date.parse(getSyncUltima() || "") || 0;
+            if (Date.now() - ult >= ms) rodar();
+        };
+        document.addEventListener("visibilitychange", aoVoltar);
+        window.addEventListener("online", rodar);
+        aoVoltar();
+        return () => { vivo = false; clearInterval(t); document.removeEventListener("visibilitychange", aoVoltar); window.removeEventListener("online", rodar); };
+    }, [loaded, syncIntervaloApp]);
     const persistTalhoes = useCallback((list) => { setTalhoes(list); saveList("talhoes", list); }, []);
     const persistAnalises = useCallback((map) => { setAnalises(map); saveList("analises_por_talhao", Object.entries(map).map(([talhaoId, itens]) => ({ talhaoId, itens }))); }, []);
     const persistAdubacoes = useCallback((map) => { setAdubacoes(map); saveList("adubacoes_por_talhao", Object.entries(map).map(([talhaoId, itens]) => ({ talhaoId, itens }))); }, []);
@@ -7312,6 +7458,10 @@ function App() {
             React.createElement(Icon, { name: "leaf", size: 28, className: "text-[#33422e] animate-pulse" }));
     }
     return (React.createElement("div", { className: "min-h-screen bg-[#f2ece0] font-sans" },
+        syncNovos && React.createElement("div", { className: "fixed bottom-4 left-4 right-4 z-50 bg-[#33422e] text-white rounded-xl shadow-lg p-3 flex items-center gap-3" },
+            React.createElement("span", { className: "text-sm flex-1" }, "H\u00E1 dados mais novos na nuvem (de outro aparelho)."),
+            React.createElement("button", { onClick: async () => { setSyncNovos(false); await recarregarTudo(); }, className: "bg-white text-[#33422e] rounded-lg px-3 py-2 text-sm font-semibold" }, "Atualizar"),
+            React.createElement("button", { onClick: () => setSyncNovos(false), className: "text-white/70 text-sm px-1", "aria-label": "Fechar" }, "\u2715")),
         showAjuda ? (React.createElement(TelaAjuda, {
             onBack: () => setShowAjuda(false),
             onAbrirNovoTalhao: () => { setShowAjuda(false); setShowTalhaoForm(true); },
