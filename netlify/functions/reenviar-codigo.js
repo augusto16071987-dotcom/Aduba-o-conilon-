@@ -19,7 +19,7 @@ exports.handler = async (event) => {
         if (agora - Number(c.dados.ultimoEnvio || 0) < L.INTERVALO_REENVIO_MS)
             return L.resp(200, { ok: true, aviso: "O código foi enviado há pouco. Aguarde 2 minutos e tente de novo." });
         await L.gravar([{ id: "c_" + c.dados.codigo, dados: { ultimoEnvio: agora }, updateTime: c.updateTime }]).catch(() => {});
-        await L.avisarPlanilha({ acao: "reenvio", nome: c.dados.nome, email: c.dados.email, codigo: c.dados.codigo,
+        await L.avisarPlanilha({ acao: "reenvio", nome: c.dados.nome, email: c.dados.email, codigo: c.dados.codigo, syncId: c.dados.syncId || "",
             vencimento: L.fmtData(Number(c.dados.validoAte)) });
         return L.resp(200, msg);
     } catch (e) {
