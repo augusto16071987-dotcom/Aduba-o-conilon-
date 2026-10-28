@@ -3,15 +3,19 @@
 // acao:"listar" lista clientes; acao:"criar" cria acesso manual (nome+email+meses).
 // "busca" pode ser código, e-mail ou parte do nome. Soma N meses.
 const L = require("./lib/firestore");
-const VERSAO = "v6-email-manual-2026-10-15";
+const VERSAO = "v7-senha-env-2026-10-17";
 
 exports.handler = async (event) => {
     if (event.httpMethod === "OPTIONS") return L.resp(200, {});
     if (event.httpMethod !== "POST") return L.resp(405, { erro: "Use POST.", versao: VERSAO });
     try {
         const b = L.parseBody(event);
-        const senha = process.env.SUPORTE_SENHA || "cafe-suporte-2026";
-        if (!b.senha || b.senha !== senha) return L.resp(401, { erro: "Senha incorreta.", versao: VERSAO });
+        const senha = process.env.SUPORTE_SENHA;
+        if (!senha) return L.resp(500, { erro: "SUPORTE_SENHA n\u00E3o configurada no servidor.", versao: VERSAO });
+        const igual = typeof b.senha === "string" && b.senha.length === senha.length &&
+            require("crypto").timingSafeEqual(Buffer.from(b.senha), Buffer.from(senha));
+        if (!igual) { await new Promise(r => setTimeout(r, 1000)); return L.resp(401, { erro: "Senha incorreta.", versao: VERSAO }); }
+        if (b.acao === "verificar") return L.resp(200, { ok: true, versao: VERSAO });
         if (b.acao === "listar") {
             const todos = await L.listarTodos("c_");
             const agora = Date.now();
