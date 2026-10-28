@@ -916,7 +916,7 @@ function TelaAssinatura({ onAtivado }) {
         if (email.trim().toLowerCase() !== email2.trim().toLowerCase()) { setErro("Os dois e-mails não são iguais. O código será enviado para esse e-mail, confira com calma."); return; }
         setOcupado(true);
         try {
-            const { res, d } = await post("iniciar-compra", { nome: nome.trim(), email: email.trim(), whatsapp: whats.trim(), plano });
+            const { res, d } = await post("iniciar-compra", { nome: nome.trim(), email: email.trim(), whatsapp: whats.trim(), plano, syncId: getSyncId() || "" });
             if (!res.ok || !d.url) { setErro(d.erro || "Não consegui abrir o pagamento."); setOcupado(false); return; }
             try { localStorage.setItem(CHAVE_PEDIDO, d.pedido); } catch (e) { }
             window.location.href = d.url;
