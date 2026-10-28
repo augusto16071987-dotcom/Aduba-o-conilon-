@@ -44,8 +44,8 @@
 <div id="root"></div>
 <script>
 "use strict";
-const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-10-28-v135-carencia";
+const { useState, useEffect, useCallback, useRef, useMemo } = React;
+const APP_VERSION = "build-2026-10-28-v136-bula";
 const APP_UPDATED_AT = "28/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -1264,6 +1264,108 @@ function lerArquivoComoBase64(file, maxBytes) {
         };
         leitor.readAsDataURL(file);
     });
+}
+
+/* ---------------------------------------------------------------
+   BULA EM PDF (compras de defensivo/herbicida) — o PDF fica FORA da lista
+   de compras pra não pesar nela: no aparelho vai pro IndexedDB (cabe
+   arquivo grande) e na nuvem vai em pedaços de ~600 mil caracteres, um
+   documento por pedaço (o limite do Firestore é ~1 MB por documento).
+   A compra guarda só o nome, o tamanho e quantos pedaços tem.
+------------------------------------------------------------------*/
+const BULA_MAX_BYTES = 4 * 1024 * 1024;
+const BULA_PEDACO = 600000;
+function bulaDb() {
+    return new Promise((resolve, reject) => {
+        if (!window.indexedDB) { reject(new Error("sem indexedDB")); return; }
+        const req = indexedDB.open("nutricafe_bulas", 1);
+        req.onupgradeneeded = () => { req.result.createObjectStore("bulas"); };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+async function bulaSalvarLocal(id, dataUrl) {
+    try {
+        const db = await bulaDb();
+        await new Promise((res, rej) => {
+            const tx = db.transaction("bulas", "readwrite");
+            tx.objectStore("bulas").put(dataUrl, id);
+            tx.oncomplete = () => res();
+            tx.onerror = () => rej(tx.error);
+        });
+        return true;
+    } catch (e) { console.error("Bula local", e); return false; }
+}
+async function bulaLerLocal(id) {
+    try {
+        const db = await bulaDb();
+        return await new Promise((res, rej) => {
+            const rq = db.transaction("bulas", "readonly").objectStore("bulas").get(id);
+            rq.onsuccess = () => res(rq.result || null);
+            rq.onerror = () => rej(rq.error);
+        });
+    } catch (e) { return null; }
+}
+async function bulaRemoverLocal(id) {
+    try {
+        const db = await bulaDb();
+        await new Promise((res) => {
+            const tx = db.transaction("bulas", "readwrite");
+            tx.objectStore("bulas").delete(id);
+            tx.oncomplete = () => res();
+            tx.onerror = () => res();
+        });
+    } catch (e) { }
+}
+// Sobe o PDF pra nuvem em pedaços. Devolve quantos pedaços foram (0 se falhou).
+async function bulaEnviarNuvem(id, dataUrl) {
+    if (!syncAtivo()) return 0;
+    const partes = Math.ceil(dataUrl.length / BULA_PEDACO);
+    try {
+        for (let i = 0; i < partes; i++) {
+            const pedaco = dataUrl.slice(i * BULA_PEDACO, (i + 1) * BULA_PEDACO);
+            const res = await fetch(firestoreDocUrl("bula_" + id + "_" + i) + "?updateMask.fieldPaths=itens&updateMask.fieldPaths=atualizadoEm", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ fields: { itens: { stringValue: JSON.stringify(pedaco) }, atualizadoEm: { stringValue: new Date().toISOString() } } }),
+            });
+            if (!res.ok) return 0;
+        }
+        return partes;
+    } catch (e) { console.error("Bula nuvem", e); return 0; }
+}
+async function bulaBaixarNuvem(id, partes) {
+    let tudo = "";
+    for (let i = 0; i < partes; i++) {
+        const p = await carregarDaNuvem("bula_" + id + "_" + i);
+        if (typeof p !== "string") return null;
+        tudo += p;
+    }
+    return tudo;
+}
+// Pega o PDF da compra: primeiro do aparelho; se não tiver (celular novo),
+// busca na nuvem e guarda aqui pra próxima vez.
+async function bulaObter(compra) {
+    let dados = await bulaLerLocal(compra.id);
+    if (!dados && compra.bulaPartes > 0) {
+        dados = await bulaBaixarNuvem(compra.id, compra.bulaPartes);
+        if (dados) bulaSalvarLocal(compra.id, dados);
+    }
+    return dados;
+}
+function bulaAbrir(dataUrl, nome) {
+    const virgula = dataUrl.indexOf(",");
+    const bin = atob(dataUrl.slice(virgula + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    const janela = window.open(url, "_blank");
+    if (!janela) {
+        const a = document.createElement("a");
+        a.href = url; a.download = nome || "bula.pdf";
+        document.body.appendChild(a); a.click(); a.remove();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 async function carregarDaNuvem(chave) {
@@ -2857,6 +2959,54 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
         }
         setEnviandoFoto(false);
     };
+    // Bula em PDF (s\u00F3 defensivo/herbicida \u2014 fungicida e inseticida entram em "Defensivo")
+    const compraId = useMemo(() => (initial ? initial.id : uid()), []);
+    const [bulaNome, setBulaNome] = useState(initial ? initial.bulaNome || "" : "");
+    const [bulaPartes, setBulaPartes] = useState(initial ? initial.bulaPartes || 0 : 0);
+    const [bulaTamanho, setBulaTamanho] = useState(initial ? initial.bulaTamanho || 0 : 0);
+    const [bulaNova, setBulaNova] = useState(null);
+    const [lendoBula, setLendoBula] = useState(false);
+    const [abrindoBula, setAbrindoBula] = useState(false);
+    const [erroBula, setErroBula] = useState("");
+    const [salvando, setSalvando] = useState(false);
+    const bulaInputRef = useRef(null);
+    const escolherBula = async (e) => {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = "";
+        if (!file) return;
+        setErroBula("");
+        if (!(file.type === "application/pdf" || /\.pdf$/i.test(file.name))) {
+            setErroBula("Escolha um arquivo em PDF.");
+            return;
+        }
+        if (file.size > BULA_MAX_BYTES) {
+            setErroBula("Esse PDF tem " + (file.size / 1048576).toFixed(1).replace(".", ",") + " MB. O m\u00E1ximo \u00E9 4 MB \u2014 tente uma vers\u00E3o menor da bula.");
+            return;
+        }
+        setLendoBula(true);
+        try {
+            const dados = await lerArquivoComoBase64(file, BULA_MAX_BYTES * 1.5);
+            setBulaNova(dados);
+            setBulaNome(file.name);
+            setBulaTamanho(file.size);
+        } catch (err) {
+            setErroBula(err.message || "N\u00E3o consegui ler esse PDF.");
+        }
+        setLendoBula(false);
+    };
+    const verBula = async () => {
+        setErroBula("");
+        setAbrindoBula(true);
+        try {
+            const dados = bulaNova || await bulaObter({ id: compraId, bulaPartes });
+            if (!dados) setErroBula("N\u00E3o achei o PDF neste aparelho. Abra com internet ligada ou anexe a bula de novo.");
+            else bulaAbrir(dados, bulaNome);
+        } catch (err) {
+            setErroBula("N\u00E3o consegui abrir o PDF.");
+        }
+        setAbrindoBula(false);
+    };
+    const removerBula = () => { setBulaNome(""); setBulaPartes(0); setBulaTamanho(0); setBulaNova(null); setErroBula(""); };
     const nutrienteInicial = (key) => (initial && initial[key] != null ? String(initial[key]) : "");
     const [n, setN] = useState(nutrienteInicial("n"));
     const [p2o5, setP2o5] = useState(nutrienteInicial("p2o5"));
@@ -2985,20 +3135,54 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
                     React.createElement("button", { type: "button", onClick: () => { setMenuFoto(false); fotoInputRef.current && fotoInputRef.current.click(); }, className: "w-full text-left px-4 py-3 rounded-xl bg-stone-100 text-stone-800 font-semibold mb-2" }, "\uD83D\uDCF7  Tirar foto"),
                     React.createElement("button", { type: "button", onClick: () => { setMenuFoto(false); galeriaInputRef.current && galeriaInputRef.current.click(); }, className: "w-full text-left px-4 py-3 rounded-xl bg-stone-100 text-stone-800 font-semibold mb-2" }, "\uD83D\uDDBC\uFE0F  Escolher da galeria"),
                     React.createElement("button", { type: "button", onClick: () => setMenuFoto(false), className: "w-full text-center px-4 py-3 text-stone-500 font-semibold" }, "Cancelar")))),
+        tipoBusca === "defensivo" && (React.createElement(Field, { label: "Bula do produto em PDF (opcional)" },
+            React.createElement("input", { ref: bulaInputRef, type: "file", accept: "application/pdf,.pdf", className: "hidden", onChange: escolherBula }),
+            !bulaNome ? (
+                React.createElement("button", { type: "button", onClick: () => bulaInputRef.current && bulaInputRef.current.click(), disabled: lendoBula, className: "w-full flex items-center justify-center gap-2 border-2 border-dashed border-stone-300 text-stone-500 rounded-lg py-4 text-sm" },
+                    React.createElement(Icon, { name: "clipboard", size: 16 }),
+                    lendoBula ? "Lendo o PDF..." : "Anexar bula (PDF)")
+            ) : (
+                React.createElement("div", { className: "flex items-center gap-3 bg-white border border-stone-200 rounded-lg p-3" },
+                    React.createElement("div", { className: "w-10 h-12 rounded bg-[#a8442f] text-white text-[10px] font-bold flex items-center justify-center shrink-0" }, "PDF"),
+                    React.createElement("div", { className: "flex-1 min-w-0" },
+                        React.createElement("p", { className: "text-sm font-semibold text-stone-800 truncate" }, bulaNome),
+                        bulaTamanho > 0 && React.createElement("p", { className: "text-xs text-stone-400" }, (bulaTamanho / 1048576 >= 1 ? (bulaTamanho / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(bulaTamanho / 1024)) + " KB")),
+                        React.createElement("div", { className: "flex gap-3 mt-1" },
+                            React.createElement("button", { type: "button", onClick: verBula, disabled: abrindoBula, className: "text-xs font-semibold text-[#4c6146] underline" }, abrindoBula ? "Abrindo..." : "Ver bula"),
+                            React.createElement("button", { type: "button", onClick: () => bulaInputRef.current && bulaInputRef.current.click(), className: "text-xs font-semibold text-stone-500 underline" }, "Trocar"),
+                            React.createElement("button", { type: "button", onClick: removerBula, className: "text-xs font-semibold text-[#a8442f] underline" }, "Remover")))
+            )),
+            erroBula && React.createElement("p", { className: "text-xs text-[#a8442f] mt-1" }, erroBula),
+            !bulaNome && React.createElement("p", { className: "text-xs text-stone-400 mt-1" }, "Vale para herbicida, fungicida e inseticida. At\u00E9 4 MB."))),
         React.createElement(Field, { label: "Observa\u00E7\u00F5es" },
             React.createElement("textarea", { className: inputCls, rows: 2, placeholder: "Alguma anota\u00E7\u00E3o extra (opcional)", value: obs, onChange: (e) => setObs(e.target.value) })),
         React.createElement("p", { className: "text-xs text-stone-400 mb-3 -mt-1" }, "Esse pre\u00E7o e composi\u00E7\u00E3o s\u00E3o usados automaticamente quando voc\u00EA registrar o uso desse mesmo produto (pelo nome) em algum talh\u00E3o."),
-        React.createElement(PrimaryBtn, { disabled: !valido, onClick: () => {
+        React.createElement(PrimaryBtn, { disabled: !valido || salvando || lendoBula, onClick: async () => {
                 const nutrientesSalvos = {};
                 NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).forEach((nu) => {
                     const val = nutrientesState[nu.key][0];
                     nutrientesSalvos[nu.key] = val !== "" ? Number(val) : null;
                 });
                 const total = Number(valorTotalCalculado.toFixed(2));
+                // Bula: só mexe no PDF se a categoria tem o campo (defensivo/herbicida).
+                let bulaMeta = initial && initial.bulaNome ? { bulaNome: initial.bulaNome, bulaPartes: initial.bulaPartes || 0, bulaTamanho: initial.bulaTamanho || 0 } : {};
+                if (tipoBusca === "defensivo") {
+                    if (!bulaNome) {
+                        if (initial && initial.bulaNome) bulaRemoverLocal(compraId);
+                        bulaMeta = {};
+                    } else if (bulaNova) {
+                        setSalvando(true);
+                        await bulaSalvarLocal(compraId, bulaNova);
+                        const partes = await bulaEnviarNuvem(compraId, bulaNova);
+                        bulaMeta = { bulaNome, bulaPartes: partes, bulaTamanho };
+                        setSalvando(false);
+                    }
+                }
                 const compraObj = {
-                    id: initial ? initial.id : uid(), data, categoria, produto: produto.trim(), formulacao: formulacao.trim(),
+                    id: compraId, data, categoria, produto: produto.trim(), formulacao: formulacao.trim(),
                     quantidade: Number(quantidade), unidade, pesoSaco: (unidade === "sacos" || unidade === "galoes") ? Number(pesoSaco) : null, valorTotal: total, obs: obs.trim(),
                     mostrarEstoque, fotoBase64: fotoBase64 || null,
+                    bulaNome: bulaMeta.bulaNome || null, bulaPartes: bulaMeta.bulaPartes || 0, bulaTamanho: bulaMeta.bulaTamanho || 0,
                     ...nutrientesSalvos,
                 };
                 if (mostrarSeletorSetor && qtdSelecionados > 0) {
@@ -3018,7 +3202,7 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
             } },
             React.createElement(Icon, { name: "check", size: 18 }),
             " ",
-            initial ? "Salvar alterações" : mostrarSeletorSetor && qtdSelecionados > 1 ? `Registrar compra + despesa em ${qtdSelecionados} talh\u00F5es` : "Registrar compra")));
+            salvando ? "Salvando a bula..." : initial ? "Salvar alterações" : mostrarSeletorSetor && qtdSelecionados > 1 ? `Registrar compra + despesa em ${qtdSelecionados} talh\u00F5es` : "Registrar compra")));
 }
 /* Soma custos de adubações/defensivos aplicados, despesas gerais e
    receitas registradas, calculando gasto total, receita total, lucro
@@ -4760,6 +4944,24 @@ function EditarIrrigacaoForm({ initial, onClose, onSave }) {
             React.createElement(Icon, { name: "check", size: 18 }),
             " Salvar altera\u00E7\u00F5es")));
 }
+function BotaoBula({ compra }) {
+    const [abrindo, setAbrindo] = useState(false);
+    const [erro, setErro] = useState("");
+    const abrir = async () => {
+        setErro("");
+        setAbrindo(true);
+        try {
+            const dados = await bulaObter(compra);
+            if (!dados) setErro("PDF n\u00E3o encontrado neste aparelho. Conecte \u00E0 internet e tente de novo.");
+            else bulaAbrir(dados, compra.bulaNome);
+        } catch (e) { setErro("N\u00E3o consegui abrir o PDF."); }
+        setAbrindo(false);
+    };
+    return React.createElement("div", { className: "mt-1.5" },
+        React.createElement("button", { type: "button", onClick: abrir, disabled: abrindo, className: "inline-flex items-center gap-1.5 text-xs font-semibold text-[#a8442f] bg-[#f7ebe6] rounded-full px-3 py-1" },
+            "\uD83D\uDCC4 ", abrindo ? "Abrindo..." : "Ver bula"),
+        erro && React.createElement("p", { className: "text-[11px] text-[#a8442f] mt-1" }, erro));
+}
 function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos, talhoes, onAdd, onUpdate, onDelete, receitas, onAddReceita, onAddReceitaEmLote, onUpdateReceita, onDeleteReceita, onAddDespesaEmLote, onBack }) {
     const [showForm, setShowForm] = useState(false);
     const [editando, setEditando] = useState(null);
@@ -4927,6 +5129,7 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos,
                         " \u00B7 ", c.quantidade, " ",
                         c.unidade === "sacos" ? `sacos de ${c.pesoSaco || 50}kg` : c.unidade === "galoes" ? `gal\u00F5es de ${c.pesoSaco || 20}L` : c.unidade,
                         " \u00B7 ", c.categoria),
+                    c.bulaNome && React.createElement(BotaoBula, { compra: c }),
                     c.obs && (React.createElement("button", { onClick: () => toggleCompraExpandida(c.id), className: "text-[10px] text-[#4c6146] font-semibold mt-1 flex items-center gap-1" },
                         comprasExpandidas[c.id] ? "Ocultar detalhes \u25B2" : "Ver detalhes \u25BC")),
                     c.obs && comprasExpandidas[c.id] && (React.createElement("p", { className: "text-xs text-stone-400 italic mt-1" }, c.obs)))))))),
@@ -5445,6 +5648,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
         ] },
         { id: "estoque", titulo: "Financeiro (compras, estoque e receitas)", itens: [
             ["Compras", "Abra {{Financeiro|financeiro}} e registre o que comprou: categoria (Adubo, Defensivo, Herbicida, Material, Equipamento ou Outro), quantidade, unidade e pre\u00E7o. A busca de produto reconhece uma base grande de formulados, micronutrientes, defensivos, herbicidas e marcas comerciais, preenchendo a composi\u00E7\u00E3o (N-P-K) sozinha quando encontra \u2014 se n\u00E3o encontrar, \u00E9 s\u00F3 digitar o nome e, se quiser, a composi\u00E7\u00E3o na m\u00E3o (calc\u00E1rio, por exemplo, n\u00E3o tem N-P-K, pode deixar em branco). Ao escolher Material ou Equipamento, os campos de composi\u00E7\u00E3o/formula\u00E7\u00E3o somem sozinhos (n\u00E3o fazem sentido pra enxada, mangueira etc) e a unidade padr\u00E3o j\u00E1 vem como \"unidade(s)\" em vez de \"sacos\"."],
+            ["Bula em PDF", "Ao registrar (ou editar) uma compra de Defensivo ou Herbicida \u2014 isso vale pra fungicida e inseticida tamb\u00E9m \u2014 aparece, logo abaixo da foto, o campo \"Bula do produto em PDF\". Toque em \"Anexar bula (PDF)\" e escolha o arquivo (at\u00E9 4 MB). Depois d\u00E1 pra tocar em \"Ver bula\", \"Trocar\" ou \"Remover\". Na lista de compras, o produto que tem bula mostra o bot\u00E3o \"Ver bula\", que abre o PDF na hora. A bula fica guardada no celular e tamb\u00E9m na nuvem, ent\u00E3o aparece em outro aparelho usando o mesmo ID de sincroniza\u00E7\u00E3o (na primeira abertura ali precisa de internet). Se o PDF for maior que 4 MB, o app avisa \u2014 tente baixar uma vers\u00E3o menor no site do fabricante."],
             ["Filtrar por categoria", "Em Compras e em Estoque, um menu suspenso \"Filtrar por categoria\" deixa mostrar s\u00F3 Adubo, Defensivo, Herbicida, Material, Equipamento ou Outro de cada vez \u2014 \u00FAtil quando a lista de produtos cresce. Cada op\u00E7\u00E3o do menu j\u00E1 mostra quantos itens tem naquela categoria."],
             ["Estoque", "Aba ao lado de Compras: mostra o saldo de cada produto (total comprado menos total j\u00E1 aplicado nos talh\u00F5es), com aviso de estoque baixo (menos de 20%) ou zerado. Herbicida lan\u00E7ado na aba Manejo tamb\u00E9m desconta daqui automaticamente. Vale tanto pra produtos s\u00F3lidos (kg) quanto l\u00EDquidos (L) \u2014 os dois descontam certo."],
             ["Sombra de reserva pra agendamentos", "Se voc\u00EA informou quantidade prevista ao agendar uma aplica\u00E7\u00E3o (no {{Calend\u00E1rio|calendario}}), o Estoque mostra essa quantidade como uma faixa mais clara dentro da barra do produto \u2014 o que j\u00E1 est\u00E1 \"reservado\" pra esse agendamento, mesmo antes de ele acontecer de verdade. Se o que est\u00E1 agendado for maior que o saldo dispon\u00EDvel, aparece um aviso: \"falta X pra cobrir o que est\u00E1 agendado\" \u2014 tanto na tela de Estoque quanto num card na tela inicial, avisando a tempo de comprar mais."],
@@ -7098,7 +7302,7 @@ function App() {
         persistAgendamentos({ ...agendamentos, [talhaoId]: atual.filter((x) => x.id !== id) });
     };
     const updateCompra = (c) => persistCompras(compras.map((x) => (x.id === c.id ? c : x)));
-    const deleteCompra = (id) => persistCompras(compras.filter((x) => x.id !== id));
+    const deleteCompra = (id) => { bulaRemoverLocal(id); persistCompras(compras.filter((x) => x.id !== id)); };
     const selected = talhoes.find((t) => t.id === selectedId);
     if (!ativado) {
         return React.createElement(TelaAssinatura, { onAtivado: () => setAtivado(true) });
