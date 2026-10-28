@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-10-28-v138-sync-email";
+const APP_VERSION = "build-2026-10-28-v139-calc";
 const APP_UPDATED_AT = "28/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -3906,8 +3906,19 @@ function TalhaoDetail({ talhao, talhoes, analises, adubacoes, agendamentos, ocor
    a área de um talhão já cadastrado, digitar direto, ou calcular
    pelo espaçamento (entrelinha x planta x número de plantas).
 ------------------------------------------------------------------*/
-function SeletorArea({ talhoes, modo, setModo, talhaoId, setTalhaoId, areaManual, setAreaManual, entrelinha, setEntrelinha, espPlanta, setEspPlanta, numPlantas, setNumPlantas }) {
-    const talhaoEscolhido = talhoes.find((t) => t.id === talhaoId);
+const TODOS_TALHOES = "__todos__";
+// Devolve o talhão escolhido; se for "todos", um talhão "virtual" com a soma de tudo.
+function talhaoOuTodos(talhoes, id, permitirTodos) {
+    if (permitirTodos && id === TODOS_TALHOES && talhoes.length) {
+        const area = talhoes.reduce((a, t) => a + (Number(t.area) || 0), 0);
+        const semPlantas = talhoes.filter((t) => !t.numPlantas).length;
+        const plantas = semPlantas ? null : talhoes.reduce((a, t) => a + Number(t.numPlantas), 0);
+        return { id: TODOS_TALHOES, nome: "Todos os talh\u00F5es", area, numPlantas: plantas, qtd: talhoes.length, semPlantas };
+    }
+    return talhoes.find((t) => t.id === id);
+}
+function SeletorArea({ permitirTodos, talhoes, modo, setModo, talhaoId, setTalhaoId, areaManual, setAreaManual, entrelinha, setEntrelinha, espPlanta, setEspPlanta, numPlantas, setNumPlantas }) {
+    const talhaoEscolhido = talhaoOuTodos(talhoes, talhaoId, permitirTodos);
     const areaCalculada = modo === "espacamento" && entrelinha && espPlanta && numPlantas
         ? (Number(entrelinha) * Number(espPlanta) * Number(numPlantas)) / 10000
         : null;
@@ -3935,11 +3946,13 @@ function SeletorArea({ talhoes, modo, setModo, talhaoId, setTalhaoId, areaManual
         modo === "talhao" && (React.createElement(Field, { label: "Selecione o talh\u00E3o" },
             React.createElement("select", { className: inputCls, value: talhaoId || "", onChange: (e) => setTalhaoId(e.target.value) },
                 React.createElement("option", { value: "" }, "Selecione..."),
+                permitirTodos && talhoes.length > 1 && React.createElement("option", { value: TODOS_TALHOES }, "Todos os talh\u00F5es (\u00E1rea total: " + fmtBR(talhoes.reduce((a, t) => a + (Number(t.area) || 0), 0), 2) + " ha)"),
                 talhoes.map((t) => React.createElement("option", { key: t.id, value: t.id },
                     t.nome,
                     " (",
                     fmtBR(t.area, 2),
                     " ha)"))))),
+        modo === "talhao" && talhaoEscolhido && talhaoEscolhido.id === TODOS_TALHOES && (React.createElement("p", { className: "text-xs text-stone-500 mb-1" }, "Somando " + talhaoEscolhido.qtd + " talh\u00F5es." + (talhaoEscolhido.semPlantas ? " " + talhaoEscolhido.semPlantas + " deles n\u00E3o tem n\u00FAmero de plantas cadastrado, ent\u00E3o o total de plantas n\u00E3o pode ser calculado." : ""))),
         modo === "manual" && (React.createElement(React.Fragment, null,
             React.createElement(Field, { label: "\u00C1rea (ha)" },
                 React.createElement(NumInput, { placeholder: "Ex: 2.5", value: areaManual, onChange: (e) => setAreaManual(e.target.value) })),
@@ -3997,7 +4010,7 @@ function CalculadoraAplicacao({ talhoes, contexto }) {
     const [capacidade, setCapacidade] = useState("20");
     const [calda, setCalda] = useState("200"); // usado só no modo foliar (L/ha)
     const [mlPorPlanta, setMlPorPlanta] = useState("50"); // usado só no modo solo
-    const talhaoEscolhido = talhoes.find((t) => t.id === talhaoId);
+    const talhaoEscolhido = talhaoOuTodos(talhoes, talhaoId, true);
     const area = modo === "talhao" ? (talhaoEscolhido ? talhaoEscolhido.area : null) :
         modo === "manual" ? (Number(areaManual) || null) :
             (entrelinha && espPlanta && numPlantas ? (Number(entrelinha) * Number(espPlanta) * Number(numPlantas)) / 10000 : null);
@@ -4021,13 +4034,13 @@ function CalculadoraAplicacao({ talhoes, contexto }) {
         const bombasPorHa = podeCalcularBase ? caldaNum / capacidadeNum : null;
         totalBombas = podeCalcularBase ? bombasPorHa * area : null;
     }
-    const baseOk = baseDose === "hectare" ? (area && totalBombas) : (plantas && totalBombas);
+    const baseOk = baseDose === "hectare" ? (area && totalBombas) : baseDose === "bomba" ? !!totalBombas : (plantas && totalBombas);
     const resultados = produtos.map((p) => {
         const doseNum = Number(p.dose) || 0;
         const ok = baseOk && doseNum > 0;
         // produtoTotal sempre na unidade grande (L ou kg)
         const produtoTotal = ok
-            ? (baseDose === "hectare" ? doseNum * area : (doseNum * plantas) / 1000)
+            ? (baseDose === "hectare" ? doseNum * area : baseDose === "bomba" ? (doseNum * totalBombas) / 1000 : (doseNum * plantas) / 1000)
             : null;
         const produtoPorBomba = ok ? produtoTotal / totalBombas : null;
         const pesoSacoNum = Number(p.pesoSaco) || 0;
@@ -4038,13 +4051,16 @@ function CalculadoraAplicacao({ talhoes, contexto }) {
     const unidadeDoseLabel = (tp) => {
         if (baseDose === "hectare")
             return `Dose por hectare, conforme a bula (${tp === "liquido" ? "L/ha" : "kg/ha"})`;
+        if (baseDose === "bomba")
+            return `Dose por bomba de ${capacidadeNum || "?"} L (${tp === "liquido" ? "mL/bomba" : "g/bomba"})`;
         return `Dose por planta (${tp === "liquido" ? "mL/planta" : "g/planta"})`;
     };
     return (React.createElement("div", { className: "space-y-3" },
-        React.createElement(SeletorArea, { talhoes: talhoes, modo: modo, setModo: setModo, talhaoId: talhaoId, setTalhaoId: setTalhaoId, areaManual: areaManual, setAreaManual: setAreaManual, entrelinha: entrelinha, setEntrelinha: setEntrelinha, espPlanta: espPlanta, setEspPlanta: setEspPlanta, numPlantas: numPlantas, setNumPlantas: setNumPlantas }),
+        React.createElement(SeletorArea, { permitirTodos: true, talhoes: talhoes, modo: modo, setModo: setModo, talhaoId: talhaoId, setTalhaoId: setTalhaoId, areaManual: areaManual, setAreaManual: setAreaManual, entrelinha: entrelinha, setEntrelinha: setEntrelinha, espPlanta: espPlanta, setEspPlanta: setEspPlanta, numPlantas: numPlantas, setNumPlantas: setNumPlantas }),
         React.createElement("div", { className: "bg-white border border-stone-200 rounded-2xl shadow-sm p-3" },
             React.createElement(Field, { label: "A dose dos produtos \u00E9 por" },
-                React.createElement(ChoiceRow, { options: [["hectare", "Hectare"], ["planta", "Planta"]], value: baseDose, onChange: setBaseDose })),
+                React.createElement(ChoiceRow, { options: [["hectare", "Hectare"], ["planta", "Planta"], ["bomba", "Bomba"]], value: baseDose, onChange: setBaseDose })),
+            baseDose === "bomba" && !totalBombas && (React.createElement("p", { className: "text-xs text-amber-600 -mt-1 mb-2" }, "Para calcular por bomba, informe a capacidade da bomba e a calda (por planta ou L/ha) com a \u00E1rea/n\u00BA de plantas.")),
             baseDose === "planta" && !plantas && (React.createElement("p", { className: "text-xs text-amber-600 -mt-1 mb-2" }, "Para calcular por planta, informe o n\u00FAmero de plantas (escolha um talh\u00E3o cadastrado com espa\u00E7amento, ou use o modo \"Espa\u00E7amento\" acima).")),
             contexto === "solo" ? (React.createElement(React.Fragment, null,
                 React.createElement("div", { className: "grid grid-cols-2 gap-3" },
@@ -4100,7 +4116,7 @@ function CalculadoraAplicacao({ talhoes, contexto }) {
                         unidadeProduto(r.tipoProduto)))))),
             React.createElement("div", { className: "pt-3 border-t border-white/20 flex items-center justify-between" },
                 React.createElement("span", { className: "text-[#cdd7c4] text-sm" }, "Total de bombas/cargas (misturados juntos)"),
-                React.createElement("span", { className: "font-bold" }, fmtBR(totalBombas, 1))))) : (React.createElement("p", { className: "text-center text-stone-400 text-sm py-4" }, "Preencha a \u00E1rea/plantas, a calibra\u00E7\u00E3o e a dose de ao menos um produto para calcular.")),
+                React.createElement("span", { className: "font-bold" }, fmtBR(totalBombas, 1) + " (" + Math.ceil(totalBombas - 1e-9) + " cheias)")))) : (React.createElement("p", { className: "text-center text-stone-400 text-sm py-4" }, "Preencha a \u00E1rea/plantas, a calibra\u00E7\u00E3o e a dose de ao menos um produto para calcular.")),
         algumOk && (React.createElement(BotoesPDF, { dadosRelatorio: () => {
                 const secaoArea = [["Modo de área", modo === "talhao" ? "Talhão cadastrado" : modo === "manual" ? "Área manual" : "Espaçamento"]];
                 if (modo === "talhao" && talhaoEscolhido)
@@ -4113,7 +4129,7 @@ function CalculadoraAplicacao({ talhoes, contexto }) {
                     secaoArea.push(["Área total", fmtBR(area, 3) + " ha"]);
                 if (plantas)
                     secaoArea.push(["Número de plantas", String(plantas)]);
-                secaoArea.push(["Dose informada por", baseDose === "hectare" ? "Hectare" : "Planta"]);
+                secaoArea.push(["Dose informada por", baseDose === "hectare" ? "Hectare" : baseDose === "bomba" ? "Bomba" : "Planta"]);
                 const secaoCalibracao = [["Capacidade da bomba", capacidade + " L"]];
                 if (contexto === "solo") {
                     secaoCalibracao.push(["Calda por planta", mlPorPlanta + " mL"]);
@@ -4130,7 +4146,7 @@ function CalculadoraAplicacao({ talhoes, contexto }) {
                 resultados.filter((r) => r.ok).forEach((r, i) => {
                     const linhas = [
                         ["Tipo", r.tipoProduto === "liquido" ? "Líquido" : "Granulado"],
-                        ["Dose informada", r.doseNum + " " + (baseDose === "hectare" ? (r.tipoProduto === "liquido" ? "L/ha" : "kg/ha") : (r.tipoProduto === "liquido" ? "mL/planta" : "g/planta"))],
+                        ["Dose informada", r.doseNum + " " + (baseDose === "hectare" ? (r.tipoProduto === "liquido" ? "L/ha" : "kg/ha") : baseDose === "bomba" ? (r.tipoProduto === "liquido" ? "mL/bomba" : "g/bomba") : (r.tipoProduto === "liquido" ? "mL/planta" : "g/planta"))],
                         ["Produto total", fmtBR(r.produtoTotal, 2) + " " + unidadeProdutoGrande(r.tipoProduto)],
                         ["Por bomba", fmtBR(r.produtoPorBomba * 1000, 0) + " " + unidadeProduto(r.tipoProduto)],
                     ];
@@ -4295,7 +4311,7 @@ function CalculadoraFertirrigacao({ talhoes }) {
                     secaoArea.push(["Área total", fmtBR(area, 3) + " ha"]);
                 if (numPlantasEfetivo)
                     secaoArea.push(["Número de plantas", String(numPlantasEfetivo)]);
-                secaoArea.push(["Dose informada por", baseDose === "hectare" ? "Hectare" : "Planta"]);
+                secaoArea.push(["Dose informada por", baseDose === "hectare" ? "Hectare" : baseDose === "bomba" ? "Bomba" : "Planta"]);
                 const secaoGotejo = [
                     ["Espaçamento entre gotejadores", espGotejador + " m"],
                     ["Vazão do gotejador", (vazaoGotejador || "não informada") + (vazaoGotejador ? " L/h" : "")],
