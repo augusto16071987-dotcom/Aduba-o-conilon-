@@ -43,11 +43,18 @@ exports.handler = async (event) => {
         const pgto = { id: "p_" + pid, criar: true, dados: { plano: ehPedido ? pedido.dados.plano : chave, valor: Math.round(plano.preco * 100), em: agora } };
 
         if (ehPedido) {
-            const r2 = await L.ativarOuRenovar({ nome: pedido.dados.nome, email: pedido.dados.email, meses: plano.meses, extras: [pgto] });
+            const r2 = await L.ativarOuRenovar({ nome: pedido.dados.nome, email: pedido.dados.email, meses: plano.meses, extras: [pgto], whatsapp: pedido.dados.whatsapp });
             // liga o pedido ao código (o app descobre o código por aqui)
             await L.gravar([{ id: "o_" + pedidoId, dados: { codigo: r2.codigo }, updateTime: (await L.lerDoc("o_" + pedidoId)).updateTime }]).catch(() => {});
             const acao = r2.novo ? "ativacao" : "renovacao";
-            await L.avisarPlanilha({ acao, nome: r2.dados.nome, email: r2.dados.email, codigo: r2.codigo,
+            let syncId = "";
+            if (r2.novo && pedido.dados.syncId) {
+                // guarda o código de sincronização no cadastro (suporte) e manda no e-mail
+                syncId = String(pedido.dados.syncId);
+                const cc = await L.lerDoc("c_" + r2.codigo);
+                if (cc) await L.gravar([{ id: "c_" + r2.codigo, dados: { syncId }, updateTime: cc.updateTime }]).catch(() => {});
+            }
+            await L.avisarPlanilha({ acao, syncId, nome: r2.dados.nome, email: r2.dados.email, codigo: r2.codigo,
                 plano: plano.titulo, valor: plano.preco, inicio: L.fmtData(agora), vencimento: L.fmtData(r2.validoAte) });
             return L.resp(200, { ok: true });
         }
