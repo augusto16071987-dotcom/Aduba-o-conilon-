@@ -45,8 +45,8 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef } = React;
-const APP_VERSION = "build-2026-10-27-v134-abas";
-const APP_UPDATED_AT = "27/10/2026";
+const APP_VERSION = "build-2026-10-28-v135-carencia";
+const APP_UPDATED_AT = "28/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
    ÍCONES — SVGs simples embutidos (sem dependência externa)
@@ -2645,12 +2645,12 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
         if (initial && initial.categoria === "Herbicida") {
             const dose = initial.doseBombada != null ? String(initial.doseBombada)
                 : (initial.quantidadeProduto != null && initial.numBombadas ? String(Number(initial.quantidadeProduto) / Number(initial.numBombadas)) : "");
-            return [{ produto: initial.descricao || "", doseBombada: dose, unidadeProduto: initial.unidadeProduto || "mL" }];
+            return [{ produto: initial.descricao || "", doseBombada: dose, unidadeProduto: initial.unidadeProduto || "mL", carencia: initial.carencia != null ? String(initial.carencia) : "" }];
         }
-        return [{ produto: "", doseBombada: "", unidadeProduto: "mL" }];
+        return [{ produto: "", doseBombada: "", unidadeProduto: "mL", carencia: "" }];
     });
     const atualizarProdutoHerbicida = (i, campo, valor) => setProdutosHerbicida((prev) => prev.map((p, idx) => idx === i ? { ...p, [campo]: valor } : p));
-    const adicionarProdutoHerbicida = () => setProdutosHerbicida((prev) => [...prev, { produto: "", doseBombada: "", unidadeProduto: "mL" }]);
+    const adicionarProdutoHerbicida = () => setProdutosHerbicida((prev) => [...prev, { produto: "", doseBombada: "", unidadeProduto: "mL", carencia: "" }]);
     const removerProdutoHerbicida = (i) => setProdutosHerbicida((prev) => prev.filter((_, idx) => idx !== i));
     const [aplicarVarios, setAplicarVarios] = useState(false);
     const [modoVarios, setModoVarios] = useState("ratear");
@@ -2729,6 +2729,8 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
                             React.createElement("option", { value: "L" }, "litros"),
                             React.createElement("option", { value: "g" }, "gramas"),
                             React.createElement("option", { value: "kg" }, "kg")))),
+                React.createElement(Field, { label: "Per\u00EDodo de car\u00EAncia (dias, opcional)" },
+                    React.createElement(NumInput, { placeholder: "Ex: 30", value: l.carencia || "", onChange: (e) => atualizarProdutoHerbicida(i, "carencia", e.target.value) })),
                 l.quantidadeProdutoTotal != null && (React.createElement("p", { className: "text-xs text-stone-500 -mt-1 mb-1" },
                     "= ", fmtBR(l.quantidadeProdutoTotal, 0), " ", l.unidadeProduto, " no total")),
                 l.produto && !l.infoPreco && (React.createElement("p", { className: "text-xs text-[#a8442f]" },
@@ -2772,6 +2774,7 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
                                     numBombadas: Number(numBombadas), capacidadeBomba: Number(capacidadeBomba),
                                     doseBombada: Number(l.doseBombada), quantidadeProduto: l.quantidadeProdutoTotal,
                                     unidadeProduto: l.unidadeProduto,
+                                    carencia: l.carencia !== "" && l.carencia != null ? Number(l.carencia) : null,
                                     replicadoQtdTalhoes: talhoesAlvo.length > 1 ? talhoesAlvo.length : null,
                                     obs: obs.trim(),
                                 },
@@ -2787,6 +2790,7 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
                     doseBombada: linhasHerbicida[0].doseBombada ? Number(linhasHerbicida[0].doseBombada) : null,
                     quantidadeProduto: linhasHerbicida[0].quantidadeProdutoTotal,
                     unidadeProduto: linhasHerbicida[0].unidadeProduto,
+                    carencia: linhasHerbicida[0].carencia !== "" && linhasHerbicida[0].carencia != null ? Number(linhasHerbicida[0].carencia) : null,
                 } : {};
                 const total = isServicoDiaria ? Number(valorTotalCalculado.toFixed(2)) : isHerbicida ? Number(custoHerbicidaCalculado.toFixed(2)) : Number(valorTotal);
                 const descricaoFinal = isHerbicida ? (linhasHerbicida[0] ? linhasHerbicida[0].produto : "") : descricao.trim();
@@ -4419,7 +4423,7 @@ function CartaoEpocasCafeicultor() {
                 Array.from({ length: 12 }, (_, i) => i + 1).map((mes) => React.createElement("div", { key: mes, className: "h-3.5 rounded-sm " + (linha.meses.includes(mes) ? "bg-[#c1443a]" : "bg-stone-100") + (mes === mesAtual ? " ring-1 ring-[#33422e]" : "") }))))),
         React.createElement("p", { className: "text-[10px] text-stone-400 mt-2" }, "Barras vermelhas = per\u00EDodo recomendado. O m\u00EAs atual fica marcado com um contorno.")));
 }
-function CalendarioScreen({ talhoes, adubacoes, defensivos, agendamentos, compras, onAddAgendamento, onAddAgendamentoEmLote, onAddAdubacao, onAddAdubacaoEmLote, onAddDefensivo, onUpdateAgendamento, onDeleteAgendamento, onUpdateAdubacao, onDeleteAdubacao, onBack }) {
+function CalendarioScreen({ talhoes, adubacoes, defensivos, despesas, agendamentos, compras, onAddAgendamento, onAddAgendamentoEmLote, onAddAdubacao, onAddAdubacaoEmLote, onAddDefensivo, onUpdateAgendamento, onDeleteAgendamento, onUpdateAdubacao, onDeleteAdubacao, onBack }) {
     const [showForm, setShowForm] = useState(false);
     const [editando, setEditando] = useState(null);
     const [editandoIrrigacao, setEditandoIrrigacao] = useState(null);
@@ -4540,6 +4544,29 @@ function CalendarioScreen({ talhoes, adubacoes, defensivos, agendamentos, compra
     const prefixoMes = ano + "-" + String(mes + 1).padStart(2, "0");
     let mmMes = 0, diasChuvaMes = 0;
     Object.keys(chuvaPorDia).forEach((d) => { if (d.indexOf(prefixoMes) === 0 && chuvaPorDia[d] > 0) { mmMes += chuvaPorDia[d]; diasChuvaMes++; } });
+    const carenciasAtivas = (() => {
+        const agora = new Date();
+        const hojeLocal = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
+        const grupos = {};
+        const add = (tid, produto, tipo, dataISO, dias) => {
+            const n = Number(dias);
+            if (!produto || !dataISO || !(n > 0)) return;
+            const [a, m, d] = String(dataISO).slice(0, 10).split("-").map(Number);
+            if (!a || !m || !d) return;
+            const inicio = new Date(a, m - 1, d);
+            const passados = Math.round((hojeLocal - inicio) / 86400000);
+            const faltam = n - passados;
+            if (passados < 0 || faltam <= 0) return;
+            const chave = produto.trim().toLowerCase() + "|" + dataISO + "|" + n;
+            if (!grupos[chave]) grupos[chave] = { produto: produto.trim(), tipo, dataISO, dias: n, faltam, fim: new Date(a, m - 1, d + n), talhoes: [] };
+            const t = (talhoes || []).find((x) => x.id === tid);
+            const nome = t ? t.nome : "Talh\u00E3o";
+            if (grupos[chave].talhoes.indexOf(nome) < 0) grupos[chave].talhoes.push(nome);
+        };
+        Object.keys(defensivos || {}).forEach((tid) => (defensivos[tid] || []).forEach((x) => add(tid, x.produto, "defensivo", x.data, x.carencia)));
+        Object.keys(despesas || {}).forEach((tid) => (despesas[tid] || []).forEach((x) => { if (x.categoria === "Herbicida") add(tid, x.descricao, "herbicida", x.data, x.carencia); }));
+        return Object.values(grupos).sort((x, y) => x.faltam - y.faltam);
+    })();
     const mmHojeChuva = chuvaPorDia[hojeISO] || 0;
     let mmAno = 0;
     Object.keys(chuvaPorDia).forEach((d) => { if (d.indexOf(String(ano) + "-") === 0) mmAno += chuvaPorDia[d]; });
@@ -4633,6 +4660,20 @@ function CalendarioScreen({ talhoes, adubacoes, defensivos, agendamentos, compra
                 chuvaMsg && React.createElement("p", { className: "text-[11px] text-amber-700" }, chuvaMsg),
                 React.createElement("p", { className: "text-[10px] text-stone-400" }, "Limite pra pular a irrigação: " + fmtMm(limiteChuva) + " mm" + (chuvaPlan && chuvaPlan.diasConsiderados === 2 ? " (hoje + ontem)" : "") + (ehCodigoChuva(chuvaUrl) ? " · " : (chuvaUrl ? " (mude na planilha, aba Config)." : ".")),
                     ehCodigoChuva(chuvaUrl) && React.createElement("button", { type: "button", onClick: () => setShowChuvaLimite(true), className: "font-semibold text-[#33628a] underline" }, "Alterar"))),
+            carenciasAtivas.length > 0 && (React.createElement("div", { className: "bg-white border border-stone-200 rounded-2xl shadow-sm p-3 space-y-3" },
+                React.createElement("p", { className: "text-sm font-bold text-stone-700 flex items-center gap-1.5" }, "\u23F3 Car\u00EAncia em andamento"),
+                carenciasAtivas.map((c) => {
+                    const frac = Math.max(0, Math.min(1, c.faltam / c.dias));
+                    const cor = "hsl(" + Math.round((1 - frac) * 120) + ", 65%, 42%)";
+                    const fimTxt = String(c.fim.getDate()).padStart(2, "0") + "/" + String(c.fim.getMonth() + 1).padStart(2, "0");
+                    return React.createElement("div", { key: c.produto + c.dataISO + c.dias },
+                        React.createElement("div", { className: "flex items-baseline justify-between gap-2" },
+                            React.createElement("span", { className: "text-sm font-semibold text-stone-800 min-w-0 truncate" }, (c.tipo === "herbicida" ? "\uD83C\uDF3F " : "\uD83D\uDC1B ") + c.produto),
+                            React.createElement("span", { className: "text-xs font-bold shrink-0", style: { color: cor } }, c.faltam + (c.faltam === 1 ? " dia" : " dias"))),
+                        React.createElement("div", { className: "h-3 rounded-full bg-stone-200 overflow-hidden mt-1", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": c.dias, "aria-valuenow": c.faltam },
+                            React.createElement("div", { className: "h-full rounded-full", style: { width: Math.round(frac * 100) + "%", background: cor, transition: "width .4s" } })),
+                        React.createElement("p", { className: "text-[11px] text-stone-500 mt-0.5" }, c.talhoes.join(", ") + " \u00B7 car\u00EAncia de " + c.dias + " dias \u00B7 libera em " + fimTxt));
+                }))),
             eventosDoDia.length === 0 && (React.createElement("p", { className: "text-center text-stone-400 text-sm py-6" }, "Nada registrado ou agendado neste dia.")),
             eventosDoDia.map((ev, i) => (React.createElement("div", { key: i, className: "bg-white border border-stone-200 rounded-2xl shadow-sm p-3" },
                 React.createElement("div", { className: "flex items-center justify-between gap-2" },
@@ -5380,6 +5421,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
         ] },
         { id: "calendario", titulo: "Calend\u00E1rio, agendamentos e avisos", itens: [
             ["Chuva e pluvi\u00F4metro", "Abaixo do calend\u00E1rio, o cart\u00E3o azul \"Chuva\" mostra os totais de hoje, do m\u00EAs e do ano, um gr\u00E1fico de barras com a chuva de cada dia (toque numa barra pra escolher o dia) e quantos mm choveram no dia selecionado. Os dias com chuva ganham um n\u00FAmero azul no calend\u00E1rio. Toque em \"Lan\u00E7ar chuva\" pra anotar na m\u00E3o (vale mais que o pluvi\u00F4metro no mesmo dia). Com o pluvi\u00F4metro digital: ligue o aparelho, conecte ele no Wi-Fi pelo celular (rede \"Pluviometro-...\"), toque em \"Conectar pluvi\u00F4metro\" e digite o c\u00F3digo da etiqueta. A chuva passa a aparecer sozinha. Se chover acima do limite (12 mm por padr\u00E3o, toque em Alterar), o app avisa que d\u00E1 pra pular a irriga\u00E7\u00E3o."],
+            ["Car\u00EAncia", "Ao registrar uma aplica\u00E7\u00E3o de defensivo (fungicida, inseticida) ou de herbicida, voc\u00EA pode informar o per\u00EDodo de car\u00EAncia em dias \u2014 \u00E9 opcional. Se preencher, o Calend\u00E1rio mostra, abaixo do cart\u00E3o de chuva, uma barra de progresso pra cada produto: ela come\u00E7a cheia e vermelha e vai diminuindo e ficando verde conforme os dias passam, at\u00E9 sumir quando a car\u00EAncia acaba. Se voc\u00EA aplicou mais de um produto, cada um aparece com a sua barra, j\u00E1 que a car\u00EAncia muda de produto pra produto. Sem car\u00EAncia preenchida, n\u00E3o aparece nada."],
             ["\u00CDcones", "Saco de adubo =aduba\u00E7\u00E3o, gota = irriga\u00E7\u00E3o, bichinho = defensivo. A cor da bolinha diz o estado: azul (agendado, data no futuro), vermelho (atrasado \u2014 a data j\u00E1 passou e ningu\u00E9m marcou como conclu\u00EDdo), verde ou laranja (j\u00E1 feito)."],
             ["Agendar", "Abra o {{Calend\u00E1rio|calendario}}, toque em \"Agendar aplica\u00E7\u00E3o\" e escolha a data, o talh\u00E3o (ou todos de uma vez, se for a mesma aplica\u00E7\u00E3o em v\u00E1rios), a forma (via solo, foliar, fertirriga\u00E7\u00E3o, irriga\u00E7\u00E3o ou outro) e o produto do estoque. \u00C9 s\u00F3 um lembrete pra n\u00E3o esquecer \u2014 n\u00E3o lan\u00E7a custo nem desconta estoque nesse momento."],
             ["Agendar v\u00E1rias datas de uma vez", "No formul\u00E1rio de agendamento, toque em \"+ Adicionar outra data\" pra empilhar v\u00E1rias datas de uma s\u00F3 vez \u2014 \u00FAtil pra fertirriga\u00E7\u00E3o semanal, por exemplo. O app cria um agendamento separado pra cada combina\u00E7\u00E3o de data, talh\u00E3o e produto, e o bot\u00E3o final mostra quantos vai criar."],
@@ -7073,7 +7115,7 @@ function App() {
             onAbrirCalculadoras: () => { setShowAjuda(false); setShowCalculadoras(true); },
             onAbrirCalendario: () => { setShowAjuda(false); setShowCalendario(true); },
             onAbrirConfiguracoes: () => { setShowAjuda(false); setShowConfiguracoes(true); },
-        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, adubacoes: adubacoes, defensivos: defensivos, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showComunidade ? (React.createElement(TelaComunidade, { onBack: () => setShowComunidade(false), meuNome: meuNomeComunidade, souAdmin: false })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], agendamentos: agendamentos[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" }, BannerVencimento(() => setShowConfiguracoes(true)),
+        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showComunidade ? (React.createElement(TelaComunidade, { onBack: () => setShowComunidade(false), meuNome: meuNomeComunidade, souAdmin: false })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], agendamentos: agendamentos[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" }, BannerVencimento(() => setShowConfiguracoes(true)),
             React.createElement("div", { className: "bg-gradient-to-br from-[#3d4f36] to-[#242e1f] text-white px-4 pt-6 pb-6 rounded-b-3xl shadow-lg" },
                 React.createElement("div", { className: "flex items-center justify-between" },
                     React.createElement("div", { className: "flex items-center gap-2" },
