@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-10-29-v140-loja";
+const APP_VERSION = "build-2026-10-29-v141-sem-cobranca";
 const APP_UPDATED_AT = "28/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -738,7 +738,7 @@ const PLANOS_ASSINATURA = [
    cobrança — planos, preços, pagamento e "renovar". Fica só: digitar o código
    de ativação, pedir teste grátis e falar com o suporte. A compra acontece
    no site, fora do app. */
-const MODO_LOJA = (() => {
+const NA_LOJA = (() => {
     try {
         const chave = STORAGE_PREFIX + "origem_play";
         const q = new URLSearchParams(window.location.search);
@@ -746,6 +746,10 @@ const MODO_LOJA = (() => {
         return localStorage.getItem(chave) === "1";
     } catch (e) { return false; }
 })();
+// Sem cobrança dentro do app em qualquer lugar (loja ou navegador): a compra e a
+// renovação acontecem só na página de vendas. NA_LOJA só controla o que muda por
+// estar dentro do app da Play Store (sem botão de instalar, sem painel de suporte).
+const MODO_LOJA = true;
 function linkWhatsApp(mensagem) {
     return "https://wa.me/" + WHATSAPP_NUMERO + "?text=" + encodeURIComponent(mensagem);
 }
@@ -1037,6 +1041,7 @@ function TelaAssinatura({ onAtivado }) {
             React.createElement("input", { key: "e", type: "email", className: inputCls, placeholder: "seu@email.com", value: email, onChange: (e) => { setEmail(e.target.value); setAviso(""); }, disabled: ocupado }),
             msgAviso,
             React.createElement("button", { key: "r", onClick: () => reenviar(email), disabled: !email.trim() || ocupado, className: "w-full mt-2 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-2.5 text-sm disabled:opacity-40" }, "Reenviar código"),
+            !NA_LOJA && React.createElement(BotaoInstalar, { key: "inst", className: "mt-4", autoAbrir: true }),
             MODO_LOJA
                 ? React.createElement("button", { key: "v", onClick: () => { setEtapa("ativar"); setPasso("teste"); setErro(""); setAviso(""); }, className: "w-full text-center text-xs text-[#4c6146] font-semibold mt-3 underline" }, "Ainda não tenho código — pedir teste grátis")
                 : React.createElement("button", { key: "v", onClick: () => { setEtapa("ativar"); setErro(""); setAviso(""); }, className: "w-full text-center text-xs text-stone-500 mt-3" }, "Voltar"),
@@ -5946,7 +5951,7 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                 React.createElement(Icon, { name: "settings", size: 20 }),
                 " Configura\u00E7\u00F5es")),
         React.createElement("div", { className: "px-4 mt-4 space-y-3" },
-            !MODO_LOJA && React.createElement(BotaoInstalar, { className: "mb-3" }),
+            !NA_LOJA && React.createElement(BotaoInstalar, { className: "mb-3" }),
             React.createElement(SecaoColapsavel, { titulo: "Assinatura", aberta: secaoAberta === "assinatura", onToggle: () => alternarSecao("assinatura") },
             ativacao ? (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm overflow-hidden" },
                 React.createElement("div", { className: "px-4 py-2.5 text-xs font-semibold uppercase tracking-wide " + (valido ? "bg-[#e7ebdd] text-[#33422e]" : "bg-red-50 text-red-700") }, valido ? (ativacao.trial ? "Teste grátis ativo" : "Assinatura ativa") : "Acesso vencido"),
@@ -6669,7 +6674,7 @@ function CotacaoCard() {
 let SUPORTE_SENHA = "";
 function suporteSolicitado() {
     try {
-        return !MODO_LOJA && new URLSearchParams(window.location.search).has("suporte");
+        return !NA_LOJA && new URLSearchParams(window.location.search).has("suporte");
     } catch (e) { return false; }
 }
 function SuporteEntrada() {
