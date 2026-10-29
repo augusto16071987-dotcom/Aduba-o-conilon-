@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-10-29-v144-excluir";
+const APP_VERSION = "build-2026-10-29-v145-excluir-nuvem";
 const APP_UPDATED_AT = "28/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -6726,13 +6726,15 @@ function TelaLiberarAssinatura({ onBack }) {
     const [lista, setLista] = useState(null);
     const [renovando, setRenovando] = useState(null);
     const [excluindo, setExcluindo] = useState(null);
+    const [apagarNuvem, setApagarNuvem] = useState(false);
     const excluirCliente = async (c) => {
         setEnviando(true); setErro(""); setMsgRen(null);
         try {
-            const { res, dados } = await chamar({ acao: "excluir", codigo: c.codigo });
+            const { res, dados } = await chamar({ acao: "excluir", codigo: c.codigo, nuvem: apagarNuvem });
             if (!res.ok) setErro(dados.erro || "N\u00E3o consegui excluir agora.");
             else {
-                setMsgRen("\uD83D\uDDD1\uFE0F " + c.nome.split(" ")[0] + " exclu\u00EDdo.");
+                setMsgRen("\uD83D\uDDD1\uFE0F " + c.nome.split(" ")[0] + " exclu\u00EDdo." + (apagarNuvem ? (dados.nuvemApagados ? " Dados da nuvem apagados (" + dados.nuvemApagados + " itens)." : " N\u00E3o havia dados dele na nuvem.") : " Os dados da lavoura na nuvem foram mantidos."));
+                setApagarNuvem(false);
                 setExcluindo(null);
                 const l = await chamar({ acao: "listar" });
                 if (l.res.ok) setLista(l.dados.clientes);
@@ -6823,10 +6825,13 @@ function TelaLiberarAssinatura({ onBack }) {
                 excluindo === c.codigo
                     ? React.createElement("div", { className: "mt-2 bg-red-50 border border-red-200 rounded-lg p-2" },
                         React.createElement("p", { className: "text-xs text-red-800 mb-2" }, "Excluir " + c.nome + " (" + c.codigo + ")? O acesso dele deixa de funcionar e o cadastro \u00E9 apagado. N\u00E3o d\u00E1 para desfazer."),
+                        React.createElement("label", { className: "flex items-start gap-2 text-xs text-red-900 mb-2 cursor-pointer" },
+                            React.createElement("input", { type: "checkbox", checked: apagarNuvem, onChange: (e) => setApagarNuvem(e.target.checked), className: "mt-0.5" }),
+                            React.createElement("span", null, "Apagar tamb\u00E9m os dados da lavoura dele na nuvem (talh\u00F5es, an\u00E1lises, compras, bulas...). Ele perde o backup para sempre.")),
                         React.createElement("div", { className: "flex gap-2" },
                             React.createElement("button", { onClick: () => excluirCliente(c), disabled: enviando, className: "flex-1 bg-[#a8442f] text-white text-xs font-semibold rounded-lg py-2 disabled:opacity-40" }, enviando ? "Excluindo..." : "Sim, excluir"),
                             React.createElement("button", { onClick: () => setExcluindo(null), disabled: enviando, className: "text-xs font-semibold text-stone-500 px-3" }, "Cancelar")))
-                    : React.createElement("button", { onClick: () => { setExcluindo(c.codigo); setRenovando(null); setMsgRen(null); setErro(""); }, className: "inline-block mt-1 ml-2 text-xs font-semibold text-[#a8442f] border border-[#a8442f] rounded-lg px-2 py-1" }, "Excluir"))) : null,
+                    : React.createElement("button", { onClick: () => { setExcluindo(c.codigo); setApagarNuvem(false); setRenovando(null); setMsgRen(null); setErro(""); }, className: "inline-block mt-1 ml-2 text-xs font-semibold text-[#a8442f] border border-[#a8442f] rounded-lg px-2 py-1" }, "Excluir"))) : null,
             React.createElement("button", { onClick: carregarLista, disabled: enviando, className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-2.5 text-sm disabled:opacity-40" }, "Atualizar lista"));
     } else if (modo === "criar") {
         corpo = React.createElement(React.Fragment, null,
