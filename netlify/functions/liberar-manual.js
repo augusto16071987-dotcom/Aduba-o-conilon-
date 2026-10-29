@@ -24,6 +24,18 @@ exports.handler = async (event) => {
                 .sort((a, b2) => b2.validoAte - a.validoAte);
             return L.resp(200, { ok: true, clientes: lista, versao: VERSAO });
         }
+        if (b.acao === "excluir") {
+            const cod = L.normalizaCodigo(b.codigo);
+            if (!cod) return L.resp(400, { erro: "C\u00F3digo inv\u00E1lido." });
+            const c = await L.lerDoc("c_" + cod);
+            if (!c) return L.resp(404, { erro: "Cliente n\u00E3o encontrado.", versao: VERSAO });
+            const ids = ["c_" + cod];
+            const canon = L.emailCanonico(c.dados.email);
+            if (canon) { const ex = await L.lerDoc(L.idEmail(canon)); if (ex && ex.dados.codigo === cod) ids.push(L.idEmail(canon)); }
+            await L.excluirDocs(ids);
+            await L.avisarPlanilha({ acao: "exclusao", codigo: cod, nome: c.dados.nome, email: c.dados.email });
+            return L.resp(200, { ok: true, excluido: cod, versao: VERSAO });
+        }
         const meses = Math.round(Number(b.meses));
         if (!(meses >= 1 && meses <= 36)) return L.resp(400, { erro: "Meses deve ser de 1 a 36." });
         if (b.acao === "criar") {
