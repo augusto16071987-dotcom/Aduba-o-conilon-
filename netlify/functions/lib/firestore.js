@@ -130,6 +130,13 @@ function novoCodigo() {
     for (let i = 0; i < 8; i++) s += ALFA[b[i] % ALFA.length];
     return s.slice(0, 4) + "-" + s.slice(4);
 }
+// Código de recuperação dos dados na nuvem (liga o cadastro aos dados do app). Ex.: sitio-k4m9x2qp
+function novoSyncId() {
+    const al = "abcdefghjkmnpqrstuvwxyz23456789"; const b = crypto.randomBytes(8); let s = "";
+    for (let i = 0; i < 8; i++) s += al[b[i] % al.length];
+    return "sitio-" + s;
+}
+function syncIdValido(v) { return /^[A-Za-z0-9-]{4,40}$/.test(String(v || "")); }
 function normalizaCodigo(c) {
     const s = String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     return s.length === 8 ? s.slice(0, 4) + "-" + s.slice(4) : "";
@@ -185,7 +192,7 @@ async function ativarOuRenovar({ nome, email, meses, extras, marca, whatsapp }) 
         }
         const codigo = novoCodigo();
         const validoAte = somaMeses(agora, meses);
-        const dados = Object.assign({ codigo, nome, email, emailCanon: canon, inicio: agora, validoAte, criadoEm: agora, ultimoEnvio: agora, ultimoPagamento: agora }, zap ? { whatsapp: zap } : {}, marca || {});
+        const dados = Object.assign({ codigo, syncId: novoSyncId(), nome, email, emailCanon: canon, inicio: agora, validoAte, criadoEm: agora, ultimoEnvio: agora, ultimoPagamento: agora }, zap ? { whatsapp: zap } : {}, marca || {});
         const g = await gravar([].concat(extras || [], [
             { id: idE, dados: { codigo, emailCanon: canon }, criar: true },
             { id: "c_" + codigo, dados, criar: true },
@@ -217,4 +224,4 @@ function statusDe(d, agora) {
 }
 
 module.exports = { zapNumero, diasPara, INTERVALO_REENVIO_MS, ativarOuRenovar, COLECAO, PLANOS, resp, lerDoc, listarTodos, gravar, emailCanonico, emailValido, idEmail,
-    novoCodigo, normalizaCodigo, somaMeses, fmtData, avisarPlanilha, parseBody, statusDe };
+    novoCodigo, novoSyncId, syncIdValido, normalizaCodigo, somaMeses, fmtData, avisarPlanilha, parseBody, statusDe };
