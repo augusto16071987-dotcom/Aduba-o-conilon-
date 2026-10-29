@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-10-29-v141-sem-cobranca";
+const APP_VERSION = "build-2026-10-29-v142-acesso";
 const APP_UPDATED_AT = "28/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -5800,12 +5800,12 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
             ["PDF e compartilhar", "Gera relat\u00F3rio completo pra salvar ou mandar no WhatsApp, tanto da vis\u00E3o geral quanto de um talh\u00E3o s\u00F3. O PDF da vis\u00E3o geral traz o mesmo gr\u00E1fico da tela (Receitas em verde x Despesas em vermelho, setor por setor) e, logo abaixo, a lista com receita, despesa e lucro de cada setor."],
         ] },
         { id: "comunidade", titulo: "\ud83d\udcac Comunidade", itens: [
-            ["O que \u00E9", "Um espa\u00E7o s\u00F3 pra assinantes conversarem entre si e trocarem experi\u00EAncias \u2014 toque no \u00EDcone de bal\u00E3o de conversa, no topo da tela inicial, ao lado de Ajuda e Configura\u00E7\u00F5es."],
-            ["Fotos e arquivos", "D\u00E1 pra mandar texto, fotos e arquivos (PDF, documentos) pra outros assinantes verem. Eles s\u00E3o comprimidos automaticamente antes de enviar (at\u00E9 uns 700KB cada), pra n\u00E3o pesar no seu plano de dados nem demorar pra carregar \u2014 em troca, a qualidade da foto fica um pouco reduzida."],
+            ["O que \u00E9", "Um espa\u00E7o s\u00F3 pra usuários conversarem entre si e trocarem experi\u00EAncias \u2014 toque no \u00EDcone de bal\u00E3o de conversa, no topo da tela inicial, ao lado de Ajuda e Configura\u00E7\u00F5es."],
+            ["Fotos e arquivos", "D\u00E1 pra mandar texto, fotos e arquivos (PDF, documentos) pra outros usuários verem. Eles s\u00E3o comprimidos automaticamente antes de enviar (at\u00E9 uns 700KB cada), pra n\u00E3o pesar no seu plano de dados nem demorar pra carregar \u2014 em troca, a qualidade da foto fica um pouco reduzida."],
             ["Atualiza\u00E7\u00E3o autom\u00E1tica", "A conversa atualiza sozinha a cada poucos segundos, sem precisar puxar a tela pra atualizar."],
-            ["Modera\u00E7\u00E3o", "\u00C9 um espa\u00E7o aberto entre assinantes \u2014 evite compartilhar dados sens\u00EDveis (senha, dados de pagamento) por l\u00E1. Mensagens impr\u00F3prias podem ser removidas."],
+            ["Modera\u00E7\u00E3o", "\u00C9 um espa\u00E7o aberto entre usuários \u2014 evite compartilhar dados sens\u00EDveis (senha, dados de pagamento) por l\u00E1. Mensagens impr\u00F3prias podem ser removidas."],
         ] },
-        { id: "assinatura", titulo: "Assinatura", itens: [
+        { id: "assinatura", titulo: "Meu acesso", itens: [
             ...(MODO_LOJA ? [
                 ["Como ativar", "Digite o c\u00F3digo de ativa\u00E7\u00E3o que voc\u00EA recebeu por e-mail (ex.: K7QM-4TXA). Guarde esse e-mail. Quer experimentar antes? Na primeira tela toque em \"Ainda n\u00E3o tenho c\u00F3digo\" para pedir um teste gr\u00E1tis pelo WhatsApp."],
                 ["Quando vencer", "Em {{Configura\u00E7\u00F5es|configuracoes}} d\u00E1 pra ver seu c\u00F3digo e o vencimento. Voc\u00EA recebe lembretes por e-mail antes de vencer, com as instru\u00E7\u00F5es. Ao receber um c\u00F3digo novo, \u00E9 s\u00F3 digit\u00E1-lo na primeira tela."],
@@ -5821,7 +5821,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
             ["Salvamento", "Tudo \u00E9 salvo sozinho no celular, sem bot\u00E3o de salvar \u2014 assim que voc\u00EA confirma um cadastro, j\u00E1 fica gravado."],
             ["Sincroniza\u00E7\u00E3o", "Se ativa (em {{Configura\u00E7\u00F5es|configuracoes}}), os dados v\u00E3o pra nuvem automaticamente, sem precisar fazer nada. Voc\u00EA escolhe de quanto em quanto tempo o app confere a nuvem (padr\u00E3o: 15 minutos) e pode tocar em \u201CSincronizar agora\u201D. Roda enquanto o app est\u00E1 aberto. Anote seu ID de sincroniza\u00E7\u00E3o \u2014 \u00E9 ele que recupera tudo sozinho num celular novo, s\u00F3 de informar o mesmo c\u00F3digo."],
             ["Backup manual", "Em {{Configura\u00E7\u00F5es|configuracoes}} d\u00E1 pra baixar um arquivo .json com todos os dados e restaurar depois \u2014 \u00FAtil como uma segunda camada de seguran\u00E7a al\u00E9m da sincroniza\u00E7\u00E3o, ou se voc\u00EA n\u00E3o quiser usar a nuvem."],
-            ["Configura\u00E7\u00F5es organizadas", "A tela de {{Configura\u00E7\u00F5es|configuracoes}} \u00E9 dividida em se\u00E7\u00F5es que abrem e fecham (Assinatura, Sincroniza\u00E7\u00E3o, Backup, Tabelas de aduba\u00E7\u00E3o) \u2014 toque no t\u00EDtulo de cada uma pra expandir e ver o conte\u00FAdo."],
+            ["Configura\u00E7\u00F5es organizadas", "A tela de {{Configura\u00E7\u00F5es|configuracoes}} \u00E9 dividida em se\u00E7\u00F5es que abrem e fecham (Meu acesso, Sincroniza\u00E7\u00E3o, Backup, Tabelas de aduba\u00E7\u00E3o) \u2014 toque no t\u00EDtulo de cada uma pra expandir e ver o conte\u00FAdo."],
             ["Bot\u00E3o de voltar do celular", "Agora navega tela por tela dentro do app (igual app nativo) em vez de fechar direto \u2014 s\u00F3 sai de verdade quando voc\u00EA j\u00E1 est\u00E1 na tela inicial."],
             ["Suas pr\u00F3prias tabelas de aduba\u00E7\u00E3o", "Em {{Configura\u00E7\u00F5es|configuracoes}} > Tabelas de aduba\u00E7\u00E3o, d\u00E1 pra cadastrar uma tabela pr\u00F3pria (por exemplo, uma recomenda\u00E7\u00E3o de um agr\u00F4nomo) informando as faixas de produtividade e as doses de N, K\u2082O (e opcionalmente P\u2082O\u2085) por classe de solo. Ela passa a aparecer como op\u00E7\u00E3o ao lado de Proc\u00E1f\u00E9, Embrapa e INCAPER-ES na hora de cadastrar ou editar um talh\u00E3o."],
         ] },
@@ -5952,9 +5952,9 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                 " Configura\u00E7\u00F5es")),
         React.createElement("div", { className: "px-4 mt-4 space-y-3" },
             !NA_LOJA && React.createElement(BotaoInstalar, { className: "mb-3" }),
-            React.createElement(SecaoColapsavel, { titulo: "Assinatura", aberta: secaoAberta === "assinatura", onToggle: () => alternarSecao("assinatura") },
+            React.createElement(SecaoColapsavel, { titulo: "Meu acesso", aberta: secaoAberta === "assinatura", onToggle: () => alternarSecao("assinatura") },
             ativacao ? (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm overflow-hidden" },
-                React.createElement("div", { className: "px-4 py-2.5 text-xs font-semibold uppercase tracking-wide " + (valido ? "bg-[#e7ebdd] text-[#33422e]" : "bg-red-50 text-red-700") }, valido ? (ativacao.trial ? "Teste grátis ativo" : "Assinatura ativa") : "Acesso vencido"),
+                React.createElement("div", { className: "px-4 py-2.5 text-xs font-semibold uppercase tracking-wide " + (valido ? "bg-[#e7ebdd] text-[#33422e]" : "bg-red-50 text-red-700") }, valido ? (ativacao.trial ? "Teste grátis ativo" : "Acesso ativo") : "Acesso vencido"),
                 React.createElement("div", { className: "px-4 py-2" },
                     ativacao.nome && React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100" },
                         React.createElement("span", { className: "text-stone-500 text-sm" }, "Nome"),
@@ -5969,7 +5969,7 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                         React.createElement("span", { className: "text-stone-500 text-sm" }, valido ? "Acesso liberado até" : "Venceu em"),
                         React.createElement("span", { className: "font-semibold text-stone-800" }, fmtDataBR(ativacao.validoAte)))),
                 !MODO_LOJA && React.createElement("p", { className: "text-[11px] text-stone-400 px-4 pb-3" }, "Sem cobrança automática: você paga só quando quiser renovar. Os dias que sobraram são somados à renovação.")))
-                : (React.createElement("p", { className: "text-center text-stone-400 text-sm py-4" }, "Nenhuma informação de assinatura encontrada.")),
+                : (React.createElement("p", { className: "text-center text-stone-400 text-sm py-4" }, "Nenhuma informação de acesso encontrada.")),
             !MODO_LOJA && ativacao && ativacao.codigo && React.createElement("div", { className: "mt-3" },
                 React.createElement("p", { className: "text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2" }, "Renovar acesso"),
                 erroPag && React.createElement("p", { className: "text-xs text-[#a8442f] mb-2" }, erroPag),
@@ -5979,7 +5979,7 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                         React.createElement("span", { className: "font-bold text-[#33422e]" }, pl.preco)),
                     React.createElement("div", { className: "text-[11px] text-stone-500 mt-0.5" }, pl.detalhe))),
                 React.createElement("p", { className: "text-[11px] text-stone-400" }, "Pagamento por PIX ou cartão pelo Mercado Pago. O acesso é liberado automaticamente.")),
-            React.createElement("a", { href: linkWhatsApp(valido ? "Olá! Gostaria de tirar uma dúvida sobre minha assinatura do NutriCafé." : "Olá! Meu acesso ao NutriCafé venceu e preciso de ajuda."), target: "_blank", rel: "noopener noreferrer", className: "w-full flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold mt-3" },
+            React.createElement("a", { href: linkWhatsApp(valido ? "Olá! Gostaria de tirar uma dúvida sobre meu acesso ao NutriCafé." : "Olá! Meu acesso ao NutriCafé venceu e preciso de ajuda."), target: "_blank", rel: "noopener noreferrer", className: "w-full flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold mt-3" },
                 React.createElement(Icon, { name: "whatsapp", size: 17 }),
                 " ",
                 valido ? "Falar no WhatsApp" : "Preciso de ajuda no WhatsApp")),
@@ -7112,7 +7112,7 @@ function TelaComunidade({ onBack, meuNome, souAdmin }) {
             React.createElement("button", { onClick: onBack, className: "text-[#cdd7c4]" }, React.createElement(Icon, { name: "chevronLeft", size: 22 })),
             React.createElement("div", null,
                 React.createElement("h1", { className: "text-white font-bold text-base" }, "\ud83d\udcac Comunidade NutriCaf\u00e9"),
-                React.createElement("p", { className: "text-[#cdd7c4] text-xs" }, "Converse e troque experi\u00eancias com outros assinantes"))),
+                React.createElement("p", { className: "text-[#cdd7c4] text-xs" }, "Converse e troque experi\u00eancias com outros usuários"))),
         React.createElement("div", { className: "flex-1 overflow-y-auto px-3 pt-3 pb-2" },
             carregando ? React.createElement("p", { className: "text-center text-stone-400 text-sm py-8" }, "Carregando...")
                 : mensagens.length === 0 ? React.createElement("p", { className: "text-center text-stone-400 text-sm py-8" }, "Nenhuma mensagem ainda. Seja o primeiro a puxar assunto!")
