@@ -74,10 +74,11 @@ async function lerDoc(id) {
     return { dados: fromFields(d.fields), updateTime: d.updateTime };
 }
 
-async function listarTodos(prefixo) {
+async function listarTodos(prefixo, colecao) {
+    colecao = colecao || COLECAO;
     const out = []; let pageToken = "";
     do {
-        const r = await fetch(BASE + "/" + COLECAO + "?pageSize=300" + (pageToken ? "&pageToken=" + encodeURIComponent(pageToken) : ""),
+        const r = await fetch(BASE + "/" + colecao + "?pageSize=300" + (pageToken ? "&pageToken=" + encodeURIComponent(pageToken) : ""),
             { headers: { Authorization: "Bearer " + await token() } });
         if (!r.ok) throw new Error("Firestore LIST " + r.status);
         const d = await r.json();
@@ -110,8 +111,9 @@ async function gravar(writes) {
 }
 
 // Apaga documentos (ids) numa só operação.
-async function excluirDocs(ids) {
-    const body = { writes: ids.map(id => ({ delete: RAIZ + "/" + COLECAO + "/" + id })) };
+async function excluirDocs(ids, colecao) {
+    colecao = colecao || COLECAO;
+    const body = { writes: ids.map(id => ({ delete: RAIZ + "/" + colecao + "/" + id })) };
     const r = await fetch(BASE + ":commit", {
         method: "POST", headers: { Authorization: "Bearer " + await token(), "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -234,5 +236,6 @@ function statusDe(d, agora) {
     };
 }
 
-module.exports = { zapNumero, diasPara, INTERVALO_REENVIO_MS, ativarOuRenovar, COLECAO, PLANOS, resp, lerDoc, listarTodos, gravar, emailCanonico, emailValido, idEmail,
+const COLECAO_DADOS_APP = "nutricafe_dados"; // onde o app guarda a lavoura de cada cliente (por código de recuperação)
+module.exports = { COLECAO_DADOS_APP, zapNumero, diasPara, INTERVALO_REENVIO_MS, ativarOuRenovar, COLECAO, PLANOS, resp, lerDoc, listarTodos, gravar, emailCanonico, emailValido, idEmail,
     novoCodigo, novoSyncId, excluirDocs, syncIdValido, normalizaCodigo, somaMeses, fmtData, avisarPlanilha, parseBody, statusDe };
