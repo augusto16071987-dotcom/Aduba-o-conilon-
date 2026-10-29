@@ -109,6 +109,17 @@ async function gravar(writes) {
     throw new Error("Firestore COMMIT " + r.status + " " + t.slice(0, 200));
 }
 
+// Apaga documentos (ids) numa só operação.
+async function excluirDocs(ids) {
+    const body = { writes: ids.map(id => ({ delete: RAIZ + "/" + COLECAO + "/" + id })) };
+    const r = await fetch(BASE + ":commit", {
+        method: "POST", headers: { Authorization: "Bearer " + await token(), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error("Firestore DELETE " + r.status + " " + (await r.text()).slice(0, 200));
+    return { ok: true };
+}
+
 // ---------- utilidades ----------
 function emailCanonico(email) {
     let e = String(email || "").trim().toLowerCase();
@@ -224,4 +235,4 @@ function statusDe(d, agora) {
 }
 
 module.exports = { zapNumero, diasPara, INTERVALO_REENVIO_MS, ativarOuRenovar, COLECAO, PLANOS, resp, lerDoc, listarTodos, gravar, emailCanonico, emailValido, idEmail,
-    novoCodigo, novoSyncId, syncIdValido, normalizaCodigo, somaMeses, fmtData, avisarPlanilha, parseBody, statusDe };
+    novoCodigo, novoSyncId, excluirDocs, syncIdValido, normalizaCodigo, somaMeses, fmtData, avisarPlanilha, parseBody, statusDe };
