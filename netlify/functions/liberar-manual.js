@@ -32,9 +32,20 @@ exports.handler = async (event) => {
             const ids = ["c_" + cod];
             const canon = L.emailCanonico(c.dados.email);
             if (canon) { const ex = await L.lerDoc(L.idEmail(canon)); if (ex && ex.dados.codigo === cod) ids.push(L.idEmail(canon)); }
+            let nuvemApagados = 0;
+            if (b.nuvem) {
+                // apaga também a cópia da lavoura na nuvem (tudo que começa com <código de recuperação>--)
+                const sid = String(c.dados.syncId || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+                if (sid.length >= 6) {
+                    const docs = await L.listarTodos(sid + "--", L.COLECAO_DADOS_APP);
+                    const nomes = docs.map((d) => d.id);
+                    for (let i = 0; i < nomes.length; i += 100) await L.excluirDocs(nomes.slice(i, i + 100), L.COLECAO_DADOS_APP);
+                    nuvemApagados = nomes.length;
+                }
+            }
             await L.excluirDocs(ids);
             await L.avisarPlanilha({ acao: "exclusao", codigo: cod, nome: c.dados.nome, email: c.dados.email });
-            return L.resp(200, { ok: true, excluido: cod, versao: VERSAO });
+            return L.resp(200, { ok: true, excluido: cod, nuvemApagados, versao: VERSAO });
         }
         const meses = Math.round(Number(b.meses));
         if (!(meses >= 1 && meses <= 36)) return L.resp(400, { erro: "Meses deve ser de 1 a 36." });
