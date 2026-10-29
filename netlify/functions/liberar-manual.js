@@ -30,7 +30,7 @@ exports.handler = async (event) => {
             const nome = String(b.nome || "").trim().replace(/\s+/g, " ").slice(0, 80);
             if (nome.length < 3 || !L.emailValido(String(b.email || "").trim())) return L.resp(400, { erro: "Informe nome completo e e-mail válido." });
             const r = await L.ativarOuRenovar({ nome, email: String(b.email).trim(), meses, marca: { liberadoManual: true } });
-            await L.avisarPlanilha({ acao: r.novo ? "ativacao" : "renovacao", nome: r.dados.nome, email: r.dados.email, codigo: r.codigo,
+            await L.avisarPlanilha({ acao: r.novo ? "ativacao" : "renovacao", syncId: r.novo ? (r.dados.syncId || "") : "", nome: r.dados.nome, email: r.dados.email, codigo: r.codigo,
                 plano: (meses === 1 ? "1 mês" : meses + " meses"), valor: 0, manual: true, inicio: L.fmtData(Date.now()), vencimento: L.fmtData(r.validoAte) });
             return L.resp(200, { ok: true, nome: r.dados.nome, email: r.dados.email, codigo: r.codigo, validoAte: r.validoAte,
                 vencimento: L.fmtData(r.validoAte), criado: r.novo, versao: VERSAO });
