@@ -16,6 +16,8 @@ exports.handler = async (event) => {
         if (!L.emailValido(email) || !L.emailCanonico(email)) return L.resp(400, { erro: "E-mail inválido." });
         if (!plano) return L.resp(400, { erro: "Escolha um plano." });
         const site = (process.env.SITE_URL || process.env.URL || "").replace(/\/$/, "");
+        // para onde o cliente volta depois de pagar: a página de vendas (SITE_VENDAS_URL), ou o app
+        const volta = (process.env.SITE_VENDAS_URL || site).replace(/\/$/, "");
         if (!site) return L.resp(500, { erro: "SITE_URL não configurada no servidor." });
 
         const pedido = crypto.randomBytes(12).toString("hex");
@@ -32,7 +34,7 @@ exports.handler = async (event) => {
                 payer: { name: nome, email },
                 external_reference: "P:" + pedido,
                 notification_url: site + "/.netlify/functions/webhook-pagamento",
-                back_urls: { success: site + "/?pago=1", pending: site + "/?pago=1", failure: site + "/?pago=0" },
+                back_urls: { success: volta + "/?pago=1", pending: volta + "/?pago=1", failure: volta + "/?pago=0" },
                 auto_return: "approved",
                 payment_methods: { excluded_payment_types: [{ id: "ticket" }, { id: "atm" }], installments: 1 },
                 statement_descriptor: "NUTRICAFE",
