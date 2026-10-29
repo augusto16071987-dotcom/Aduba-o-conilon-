@@ -15,6 +15,8 @@ exports.handler = async (event) => {
         if (!c) return L.resp(404, { erro: "Código não encontrado." });
 
         const site = (process.env.SITE_URL || process.env.URL || "").replace(/\/$/, "");
+        // para onde o cliente volta depois de pagar: a página de vendas (SITE_VENDAS_URL), ou o app
+        const volta = (process.env.SITE_VENDAS_URL || site).replace(/\/$/, "");
         if (!site) return L.resp(500, { erro: "SITE_URL não configurada no servidor." });
 
         const pref = {
@@ -22,7 +24,7 @@ exports.handler = async (event) => {
             payer: { name: c.dados.nome, email: c.dados.email },
             external_reference: codigo + "|" + b.plano,
             notification_url: site + "/.netlify/functions/webhook-pagamento",
-            back_urls: { success: site + "/?pago=1", pending: site + "/?pago=1", failure: site + "/?pago=0" },
+            back_urls: { success: volta + "/?pago=1", pending: volta + "/?pago=1", failure: volta + "/?pago=0" },
             auto_return: "approved",
             payment_methods: {
                 excluded_payment_types: [{ id: "ticket" }, { id: "atm" }],
