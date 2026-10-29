@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-10-29-v142-acesso";
+const APP_VERSION = "build-2026-10-29-v143-codigo-nuvem";
 const APP_UPDATED_AT = "28/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -786,14 +786,23 @@ function guardarAtivacaoDoServidor(info) {
     salvarAtivacao({ codigo: info.codigo, nome: info.nome, email: info.email, validoAte: info.validoAte, trial: !!info.trial, ultimoVisto: info.agora || Date.now() });
 }
 // Pergunta ao servidor a validade do código. Devolve { ok:true, ... } ou { ok:false, erro, rede }.
+function appTemDados() {
+    try { const r = localStorage.getItem(STORAGE_PREFIX + "talhoes"); const l = r ? JSON.parse(r) : []; return Array.isArray(l) && l.length > 0; } catch (e) { return false; }
+}
 async function consultarStatusAssinatura(codigo) {
     try {
+        const temDados = appTemDados();
         const res = await fetch("/.netlify/functions/status", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ codigo }), cache: "no-store",
+            body: JSON.stringify({ codigo, syncId: getSyncId() || "", temDados }), cache: "no-store",
         });
         const dados = await res.json();
         if (!res.ok || !dados.ok) return { ok: false, erro: dados.erro || "Não consegui verificar agora.", rede: false, naoEncontrado: res.status === 404 };
+        // Celular novo (sem dados): adota o código de recuperação do cadastro e puxa os dados da nuvem.
+        if (dados.syncId && !temDados && dados.syncId !== getSyncId()) {
+            setSyncId(dados.syncId);
+            try { window.dispatchEvent(new Event("nutricafe-sync-trocou")); } catch (e) { }
+        }
         return dados;
     }
     catch (e) {
@@ -7316,6 +7325,11 @@ function App() {
         setTabelasCustomizadas(tc);
     }, []);
     const [syncNovos, setSyncNovos] = useState(false);
+    useEffect(() => {
+        const aoTrocar = () => { recarregarTudo(); };
+        window.addEventListener("nutricafe-sync-trocou", aoTrocar);
+        return () => window.removeEventListener("nutricafe-sync-trocou", aoTrocar);
+    }, []);
     const [syncIntervaloApp, setSyncIntervaloApp] = useState(getSyncIntervalo());
     useEffect(() => {
         const aoMudar = () => setSyncIntervaloApp(getSyncIntervalo());
