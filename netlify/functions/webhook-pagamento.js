@@ -47,7 +47,7 @@ exports.handler = async (event) => {
             // liga o pedido ao código (o app descobre o código por aqui)
             await L.gravar([{ id: "o_" + pedidoId, dados: { codigo: r2.codigo }, updateTime: (await L.lerDoc("o_" + pedidoId)).updateTime }]).catch(() => {});
             const acao = r2.novo ? "ativacao" : "renovacao";
-            const syncId = r2.novo ? (r2.dados.syncId || "") : "";
+            const syncId = r2.dados.syncId || "";
             await L.avisarPlanilha({ acao, syncId, nome: r2.dados.nome, email: r2.dados.email, codigo: r2.codigo,
                 plano: plano.titulo, valor: plano.preco, inicio: L.fmtData(agora), vencimento: L.fmtData(r2.validoAte) });
             return L.resp(200, { ok: true });
@@ -58,7 +58,7 @@ exports.handler = async (event) => {
             const novo = L.somaMeses(Math.max(agora, Number(c.dados.validoAte) || 0), plano.meses);
             const g = await L.gravar([pgto, { id: "c_" + codigoRenov, updateTime: c.updateTime, dados: { validoAte: novo, ultimoPagamento: agora } }]);
             if (g.ok) {
-                await L.avisarPlanilha({ acao: "renovacao", nome: c.dados.nome, email: c.dados.email, codigo: codigoRenov,
+                await L.avisarPlanilha({ acao: "renovacao", syncId: c.dados.syncId || "", nome: c.dados.nome, email: c.dados.email, codigo: codigoRenov,
                     plano: plano.titulo, valor: plano.preco, vencimento: L.fmtData(novo) });
                 return L.resp(200, { ok: true });
             }
