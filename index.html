@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-10-29-v145-excluir-nuvem";
+const APP_VERSION = "build-2026-10-29-v146-chuva-na-aba-tempo";
 const APP_UPDATED_AT = "28/10/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -4750,18 +4750,12 @@ function CartaoEpocasCafeicultor() {
                 Array.from({ length: 12 }, (_, i) => i + 1).map((mes) => React.createElement("div", { key: mes, className: "h-3.5 rounded-sm " + (linha.meses.includes(mes) ? "bg-[#c1443a]" : "bg-stone-100") + (mes === mesAtual ? " ring-1 ring-[#33422e]" : "") }))))),
         React.createElement("p", { className: "text-[10px] text-stone-400 mt-2" }, "Barras vermelhas = per\u00EDodo recomendado. O m\u00EAs atual fica marcado com um contorno.")));
 }
-function CalendarioScreen({ talhoes, adubacoes, defensivos, despesas, agendamentos, compras, onAddAgendamento, onAddAgendamentoEmLote, onAddAdubacao, onAddAdubacaoEmLote, onAddDefensivo, onUpdateAgendamento, onDeleteAgendamento, onUpdateAdubacao, onDeleteAdubacao, onBack }) {
-    const [showForm, setShowForm] = useState(false);
-    const [editando, setEditando] = useState(null);
-    const [editandoIrrigacao, setEditandoIrrigacao] = useState(null);
-    const [concluindo, setConcluindo] = useState(null);
-    const [concluindoDefensivo, setConcluindoDefensivo] = useState(null);
+function CartaoChuva() {
     const hoje = new Date();
     const hojeISO = hoje.toISOString().slice(0, 10);
-    const [ano, setAno] = useState(hoje.getFullYear());
-    const [mes, setMes] = useState(hoje.getMonth());
+    const ano = hoje.getFullYear();
+    const mes = hoje.getMonth();
     const [diaSelecionado, setDiaSelecionado] = useState(hojeISO);
-    // chuva: planilha do pluviômetro + lançamentos manuais
     const [chuvaUrl, setChuvaUrl] = useState(lerChuvaUrl());
     const [chuvaPlan, setChuvaPlan] = useState(lerChuvaCache());
     const [chuvaManual, setChuvaManual] = useState([]);
@@ -4778,6 +4772,101 @@ function CalendarioScreen({ talhoes, adubacoes, defensivos, despesas, agendament
         try { setChuvaPlan(await buscarChuvaPlanilha(url)); }
         catch (e) { setChuvaMsg(e && e.doServidor ? String(e.message) : "Não consegui ler o pluviômetro agora (sem internet?). Mostrando a última leitura salva."); }
         setChuvaBuscando(false);
+    };
+    useEffect(() => { loadListSincronizado("chuva_manual").then((l) => setChuvaManual(Array.isArray(l) ? l : [])); }, []);
+    useEffect(() => { if (chuvaUrl) atualizarChuva(chuvaUrl); }, [chuvaUrl]);
+    const salvarChuvaManual = (lista) => { setChuvaManual(lista); saveList("chuva_manual", lista); };
+    const chuvaPorDia = {};
+    const origemChuva = {};
+    if (chuvaPlan && chuvaPlan.dias) Object.keys(chuvaPlan.dias).forEach((d) => { chuvaPorDia[d] = chuvaPlan.dias[d]; origemChuva[d] = "planilha"; });
+    chuvaManual.forEach((c) => { chuvaPorDia[c.data] = Number(c.mm) || 0; origemChuva[c.data] = "manual"; });
+    const limiteChuva = (chuvaPlan && chuvaPlan.limite) || LIMITE_CHUVA_PADRAO;
+    const semSinalChuva = !!(chuvaUrl && chuvaPlan && chuvaPlan.ultimo && (Date.now() - new Date(chuvaPlan.ultimo).getTime()) > 3 * 3600 * 1000);
+    const prefixoMes = ano + "-" + String(mes + 1).padStart(2, "0");
+    let mmMes = 0, diasChuvaMes = 0;
+    Object.keys(chuvaPorDia).forEach((d) => { if (d.indexOf(prefixoMes) === 0 && chuvaPorDia[d] > 0) { mmMes += chuvaPorDia[d]; diasChuvaMes++; } });
+    const mmHojeChuva = chuvaPorDia[hojeISO] || 0;
+    let mmAno = 0;
+    Object.keys(chuvaPorDia).forEach((d) => { if (d.indexOf(String(ano) + "-") === 0) mmAno += chuvaPorDia[d]; });
+    const nDias = new Date(ano, mes + 1, 0).getDate();
+    const diasDoMesChuva = Array.from({ length: nDias }, (_, i) => { const iso = prefixoMes + "-" + String(i + 1).padStart(2, "0"); return { iso, dia: i + 1, mm: chuvaPorDia[iso] || 0 }; });
+    const escalaChuva = Math.max(1, limiteChuva, ...diasDoMesChuva.map((d) => d.mm));
+    const tileChuva = (rot, val, sub) => React.createElement("div", { key: rot, className: "bg-white/70 rounded-xl px-1.5 py-2 text-center min-w-0" },
+        React.createElement("p", { className: "text-[10px] uppercase font-semibold text-[#33628a] truncate" }, rot),
+        React.createElement("p", { className: "text-base font-bold text-stone-800 leading-tight" }, val),
+        React.createElement("p", { className: "text-[10px] text-stone-500 truncate" }, sub || "\u00A0"));
+    const mmDia = chuvaPorDia[diaSelecionado];
+    const manualDoDia = chuvaManual.find((c) => c.data === diaSelecionado);
+    const irrigacoesNoDia = 0;
+    return (React.createElement(React.Fragment, null,
+            React.createElement("div", { className: "bg-[#eaf2f8] border border-[#c9dced] rounded-2xl p-3 space-y-2" },
+                React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                    React.createElement("span", { className: "flex items-center gap-2 font-semibold text-[#33628a] text-sm" },
+                        React.createElement(Icon, { name: "droplet", size: 15 }),
+                        "Chuva"),
+                    React.createElement("span", { className: "text-[11px] text-[#33628a]" }, MESES_NOME[mes] + " " + ano)),
+                React.createElement("div", { className: "grid grid-cols-3 gap-2" },
+                    tileChuva("Hoje", fmtMm(mmHojeChuva) + " mm", hojeISO in chuvaPorDia ? "" : "sem chuva"),
+                    tileChuva(MESES_NOME[mes], fmtMm(mmMes) + " mm", diasChuvaMes + (diasChuvaMes === 1 ? " dia com chuva" : " dias com chuva")),
+                    tileChuva("Ano " + ano, fmtMm(mmAno) + " mm", "")),
+                React.createElement("div", null,
+                    React.createElement("div", { className: "flex items-end gap-[2px] h-14 border-b border-[#c9dced]" }, diasDoMesChuva.map((d) => React.createElement("button", { key: d.iso, type: "button", onClick: () => setDiaSelecionado(d.iso), "aria-label": d.dia + ": " + fmtMm(d.mm) + " mm", className: "flex-1 min-w-0 h-full flex items-end" },
+                        React.createElement("span", { className: "block w-full rounded-t-sm " + (d.iso === diaSelecionado ? "ring-1 ring-[#33422e] " : ""), style: { height: Math.max(d.mm > 0 ? 4 : 2, Math.round(d.mm / escalaChuva * 52)) + "px", background: d.mm >= limiteChuva ? "#1f4f7a" : (d.mm > 0 ? "#5b9bd5" : "#cfdce8") } })))),
+                    React.createElement("div", { className: "flex justify-between text-[9px] text-stone-400 mt-0.5" },
+                        React.createElement("span", null, "dia 1"),
+                        React.createElement("span", null, "chuva por dia (toque numa barra)"),
+                        React.createElement("span", null, "dia " + diasDoMesChuva.length))),
+                React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                    React.createElement("p", { className: "text-sm text-stone-700" },
+                        mmDia != null ? React.createElement(React.Fragment, null, React.createElement("b", null, fmtMm(mmDia) + " mm"), " neste dia", React.createElement("span", { className: "text-[11px] text-stone-400" }, origemChuva[diaSelecionado] === "manual" ? " · lançada por você" : " · pluviômetro")) : "Sem chuva registrada neste dia."),
+                    manualDoDia ? React.createElement(AcoesRegistro, { onEdit: () => { setEditandoChuva(manualDoDia); setShowChuvaForm(true); }, onDelete: () => salvarChuvaManual(chuvaManual.filter((c) => c.id !== manualDoDia.id)), confirmMsg: "Apagar a chuva lançada neste dia?" }) : React.createElement("button", { type: "button", onClick: () => { setEditandoChuva(null); setShowChuvaForm(true); }, className: "shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#33628a] text-white text-xs font-semibold active:bg-[#274d6e]" },
+                        React.createElement(Icon, { name: "plus", size: 12 }),
+                        "Lançar chuva")),
+                mmDia != null && mmDia >= limiteChuva && React.createElement("p", { className: "text-xs text-[#7a4a12] bg-[#fdf3e0] border border-[#f0d9a8] rounded-lg px-3 py-2" }, "Choveu " + fmtMm(mmDia) + " mm, acima do limite de " + fmtMm(limiteChuva) + " mm — dá pra pular a irrigação deste dia." + (irrigacoesNoDia > 0 ? " Tem " + irrigacoesNoDia + (irrigacoesNoDia === 1 ? " irrigação agendada" : " irrigações agendadas") + " pra hoje." : "")),
+                chuvaUrl ? React.createElement("div", { className: "flex items-center justify-between gap-2 text-[11px] text-stone-500" },
+                    React.createElement("span", { className: semSinalChuva ? "text-amber-700 font-semibold" : "" }, chuvaBuscando ? "Lendo o pluviômetro..." : (chuvaPlan && chuvaPlan.ultimo ? "Pluviômetro: último sinal " + textoHaQuanto(chuvaPlan.ultimo) + (semSinalChuva ? " — confira a energia e o Wi-Fi do aparelho" : "") : "Pluviômetro conectado, ainda sem sinal.")),
+                    React.createElement("span", { className: "flex items-center gap-3 shrink-0" },
+                        React.createElement("button", { type: "button", onClick: () => atualizarChuva(chuvaUrl), className: "font-semibold text-[#33628a] underline" }, "Atualizar"),
+                        React.createElement("button", { type: "button", onClick: () => setShowChuvaConfig(true), className: "font-semibold text-[#33628a] underline" }, "Configurar")))
+                    : React.createElement("button", { type: "button", onClick: () => setShowChuvaConfig(true), className: "text-[11px] font-semibold text-[#33628a] underline" }, "Conectar pluviômetro"),
+                chuvaMsg && React.createElement("p", { className: "text-[11px] text-amber-700" }, chuvaMsg),
+                React.createElement("p", { className: "text-[10px] text-stone-400" }, "Limite pra pular a irrigação: " + fmtMm(limiteChuva) + " mm" + (chuvaPlan && chuvaPlan.diasConsiderados === 2 ? " (hoje + ontem)" : "") + (ehCodigoChuva(chuvaUrl) ? " · " : (chuvaUrl ? " (mude na planilha, aba Config)." : ".")),
+                    ehCodigoChuva(chuvaUrl) && React.createElement("button", { type: "button", onClick: () => setShowChuvaLimite(true), className: "font-semibold text-[#33628a] underline" }, "Alterar"))),
+        showChuvaForm && (React.createElement(ChuvaForm, { dataInicial: diaSelecionado, inicial: editandoChuva, onClose: () => { setShowChuvaForm(false); setEditandoChuva(null); }, onSave: (c) => {
+                // um lançamento manual por dia: se já existir um nesse dia, ele é trocado
+                const semEsse = chuvaManual.filter((x) => x.id !== c.id && x.data !== c.data);
+                salvarChuvaManual([...semEsse, c]);
+                setShowChuvaForm(false);
+                setEditandoChuva(null);
+                setDiaSelecionado(c.data);
+            } })),
+        showChuvaLimite && (React.createElement(ChuvaLimiteModal, { codigo: chuvaUrl, limiteAtual: limiteChuva, diasAtual: chuvaPlan && chuvaPlan.diasConsiderados, onClose: () => setShowChuvaLimite(false), onSalvo: () => { setShowChuvaLimite(false); atualizarChuva(chuvaUrl); } })),
+        showChuvaConfig && (React.createElement(ChuvaConfigModal, { urlAtual: chuvaUrl, onClose: () => setShowChuvaConfig(false), onSave: (u) => {
+                salvarChuvaUrl(u);
+                setChuvaUrl(u);
+                if (!u) { setChuvaPlan(null); setChuvaMsg(""); }
+                setShowChuvaConfig(false);
+            } })),
+    ));
+}
+function CalendarioScreen({ talhoes, adubacoes, defensivos, despesas, agendamentos, compras, onAddAgendamento, onAddAgendamentoEmLote, onAddAdubacao, onAddAdubacaoEmLote, onAddDefensivo, onUpdateAgendamento, onDeleteAgendamento, onUpdateAdubacao, onDeleteAdubacao, onBack }) {
+    const [showForm, setShowForm] = useState(false);
+    const [editando, setEditando] = useState(null);
+    const [editandoIrrigacao, setEditandoIrrigacao] = useState(null);
+    const [concluindo, setConcluindo] = useState(null);
+    const [concluindoDefensivo, setConcluindoDefensivo] = useState(null);
+    const hoje = new Date();
+    const hojeISO = hoje.toISOString().slice(0, 10);
+    const [ano, setAno] = useState(hoje.getFullYear());
+    const [mes, setMes] = useState(hoje.getMonth());
+    const [diaSelecionado, setDiaSelecionado] = useState(hojeISO);
+    // chuva: planilha do pluviômetro + lançamentos manuais
+    const [chuvaUrl, setChuvaUrl] = useState(lerChuvaUrl());
+    const [chuvaPlan, setChuvaPlan] = useState(lerChuvaCache());
+    const [chuvaManual, setChuvaManual] = useState([]);
+    const atualizarChuva = async (url) => {
+        if (!fonteChuvaValida(url)) return;
+        try { setChuvaPlan(await buscarChuvaPlanilha(url)); } catch (e) { }
     };
     useEffect(() => { loadListSincronizado("chuva_manual").then((l) => setChuvaManual(Array.isArray(l) ? l : [])); }, []);
     useEffect(() => { if (chuvaUrl) atualizarChuva(chuvaUrl); }, [chuvaUrl]);
@@ -4903,9 +4992,6 @@ function CalendarioScreen({ talhoes, adubacoes, defensivos, despesas, agendament
         React.createElement("p", { className: "text-[10px] uppercase font-semibold text-[#33628a] truncate" }, rot),
         React.createElement("p", { className: "text-base font-bold text-stone-800 leading-tight" }, val),
         React.createElement("p", { className: "text-[10px] text-stone-500 truncate" }, sub || "\u00A0"));
-    const mmDia = chuvaPorDia[diaSelecionado];
-    const manualDoDia = chuvaManual.find((c) => c.data === diaSelecionado);
-    const irrigacoesNoDia = eventosDoDia.filter((ev) => ev.tipo === "agendamento" && ev.item.forma === "irrigacao" && !ev.item.concluido).length;
     return (React.createElement("div", { className: "pb-24" },
         React.createElement("div", { className: "bg-gradient-to-br from-[#3d4f36] to-[#242e1f] text-white px-4 pt-4 pb-5 rounded-b-3xl shadow-lg" },
             React.createElement("button", { onClick: onBack, className: "flex items-center gap-1 text-[#cdd7c4] text-sm mb-3" },
@@ -4952,41 +5038,8 @@ function CalendarioScreen({ talhoes, adubacoes, defensivos, despesas, agendament
                 ].map(([icone, cor, texto]) => (React.createElement("span", { key: texto, className: "flex items-center gap-1" },
                     React.createElement("span", { style: { color: cor } }, React.createElement(Icon, { name: icone, size: 12 })),
                     texto)))),
-            React.createElement("p", { className: "text-[11px] text-[#33628a] px-1 -mt-1" }, "Número azul no dia = chuva em mm (pluviômetro ou lançada por você)."),
+            React.createElement("p", { className: "text-[11px] text-[#33628a] px-1 -mt-1" }, "Número azul no dia = chuva em mm. Pra lançar chuva ou conectar o pluviômetro: Início > aba Tempo."),
             React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase px-1 pt-2" }, new Date(diaSelecionado + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })),
-            React.createElement("div", { className: "bg-[#eaf2f8] border border-[#c9dced] rounded-2xl p-3 space-y-2" },
-                React.createElement("div", { className: "flex items-center justify-between gap-2" },
-                    React.createElement("span", { className: "flex items-center gap-2 font-semibold text-[#33628a] text-sm" },
-                        React.createElement(Icon, { name: "droplet", size: 15 }),
-                        "Chuva"),
-                    React.createElement("span", { className: "text-[11px] text-[#33628a]" }, MESES_NOME[mes] + " " + ano)),
-                React.createElement("div", { className: "grid grid-cols-3 gap-2" },
-                    tileChuva("Hoje", fmtMm(mmHojeChuva) + " mm", hojeISO in chuvaPorDia ? "" : "sem chuva"),
-                    tileChuva(MESES_NOME[mes], fmtMm(mmMes) + " mm", diasChuvaMes + (diasChuvaMes === 1 ? " dia com chuva" : " dias com chuva")),
-                    tileChuva("Ano " + ano, fmtMm(mmAno) + " mm", "")),
-                React.createElement("div", null,
-                    React.createElement("div", { className: "flex items-end gap-[2px] h-14 border-b border-[#c9dced]" }, diasDoMesChuva.map((d) => React.createElement("button", { key: d.iso, type: "button", onClick: () => setDiaSelecionado(d.iso), "aria-label": d.dia + ": " + fmtMm(d.mm) + " mm", className: "flex-1 min-w-0 h-full flex items-end" },
-                        React.createElement("span", { className: "block w-full rounded-t-sm " + (d.iso === diaSelecionado ? "ring-1 ring-[#33422e] " : ""), style: { height: Math.max(d.mm > 0 ? 4 : 2, Math.round(d.mm / escalaChuva * 52)) + "px", background: d.mm >= limiteChuva ? "#1f4f7a" : (d.mm > 0 ? "#5b9bd5" : "#cfdce8") } })))),
-                    React.createElement("div", { className: "flex justify-between text-[9px] text-stone-400 mt-0.5" },
-                        React.createElement("span", null, "dia 1"),
-                        React.createElement("span", null, "chuva por dia (toque numa barra)"),
-                        React.createElement("span", null, "dia " + diasDoMesChuva.length))),
-                React.createElement("div", { className: "flex items-center justify-between gap-2" },
-                    React.createElement("p", { className: "text-sm text-stone-700" },
-                        mmDia != null ? React.createElement(React.Fragment, null, React.createElement("b", null, fmtMm(mmDia) + " mm"), " neste dia", React.createElement("span", { className: "text-[11px] text-stone-400" }, origemChuva[diaSelecionado] === "manual" ? " · lançada por você" : " · pluviômetro")) : "Sem chuva registrada neste dia."),
-                    manualDoDia ? React.createElement(AcoesRegistro, { onEdit: () => { setEditandoChuva(manualDoDia); setShowChuvaForm(true); }, onDelete: () => salvarChuvaManual(chuvaManual.filter((c) => c.id !== manualDoDia.id)), confirmMsg: "Apagar a chuva lançada neste dia?" }) : React.createElement("button", { type: "button", onClick: () => { setEditandoChuva(null); setShowChuvaForm(true); }, className: "shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#33628a] text-white text-xs font-semibold active:bg-[#274d6e]" },
-                        React.createElement(Icon, { name: "plus", size: 12 }),
-                        "Lançar chuva")),
-                mmDia != null && mmDia >= limiteChuva && React.createElement("p", { className: "text-xs text-[#7a4a12] bg-[#fdf3e0] border border-[#f0d9a8] rounded-lg px-3 py-2" }, "Choveu " + fmtMm(mmDia) + " mm, acima do limite de " + fmtMm(limiteChuva) + " mm — dá pra pular a irrigação deste dia." + (irrigacoesNoDia > 0 ? " Tem " + irrigacoesNoDia + (irrigacoesNoDia === 1 ? " irrigação agendada" : " irrigações agendadas") + " pra hoje." : "")),
-                chuvaUrl ? React.createElement("div", { className: "flex items-center justify-between gap-2 text-[11px] text-stone-500" },
-                    React.createElement("span", { className: semSinalChuva ? "text-amber-700 font-semibold" : "" }, chuvaBuscando ? "Lendo o pluviômetro..." : (chuvaPlan && chuvaPlan.ultimo ? "Pluviômetro: último sinal " + textoHaQuanto(chuvaPlan.ultimo) + (semSinalChuva ? " — confira a energia e o Wi-Fi do aparelho" : "") : "Pluviômetro conectado, ainda sem sinal.")),
-                    React.createElement("span", { className: "flex items-center gap-3 shrink-0" },
-                        React.createElement("button", { type: "button", onClick: () => atualizarChuva(chuvaUrl), className: "font-semibold text-[#33628a] underline" }, "Atualizar"),
-                        React.createElement("button", { type: "button", onClick: () => setShowChuvaConfig(true), className: "font-semibold text-[#33628a] underline" }, "Configurar")))
-                    : React.createElement("button", { type: "button", onClick: () => setShowChuvaConfig(true), className: "text-[11px] font-semibold text-[#33628a] underline" }, "Conectar pluviômetro"),
-                chuvaMsg && React.createElement("p", { className: "text-[11px] text-amber-700" }, chuvaMsg),
-                React.createElement("p", { className: "text-[10px] text-stone-400" }, "Limite pra pular a irrigação: " + fmtMm(limiteChuva) + " mm" + (chuvaPlan && chuvaPlan.diasConsiderados === 2 ? " (hoje + ontem)" : "") + (ehCodigoChuva(chuvaUrl) ? " · " : (chuvaUrl ? " (mude na planilha, aba Config)." : ".")),
-                    ehCodigoChuva(chuvaUrl) && React.createElement("button", { type: "button", onClick: () => setShowChuvaLimite(true), className: "font-semibold text-[#33628a] underline" }, "Alterar"))),
             carenciasAtivas.length > 0 && (React.createElement("div", { className: "bg-white border border-stone-200 rounded-2xl shadow-sm p-3 space-y-3" },
                 React.createElement("p", { className: "text-sm font-bold text-stone-700 flex items-center gap-1.5" }, "\u23F3 Car\u00EAncia em andamento"),
                 carenciasAtivas.map((c) => {
@@ -5033,21 +5086,6 @@ function CalendarioScreen({ talhoes, adubacoes, defensivos, despesas, agendament
                 ev.item.obs && React.createElement("p", { className: "text-xs text-stone-400 italic mt-0.5" }, ev.item.obs)))),
             React.createElement("p", { className: "text-xs text-stone-400 px-1" }, "Ao marcar um agendamento como \"Conclu\u00EDdo\", ele vira um registro de verdade no hist\u00F3rico do talh\u00E3o (com custo) e sai desta lista."),
             React.createElement(CartaoEpocasCafeicultor, null)),
-        showChuvaForm && (React.createElement(ChuvaForm, { dataInicial: diaSelecionado, inicial: editandoChuva, onClose: () => { setShowChuvaForm(false); setEditandoChuva(null); }, onSave: (c) => {
-                // um lançamento manual por dia: se já existir um nesse dia, ele é trocado
-                const semEsse = chuvaManual.filter((x) => x.id !== c.id && x.data !== c.data);
-                salvarChuvaManual([...semEsse, c]);
-                setShowChuvaForm(false);
-                setEditandoChuva(null);
-                setDiaSelecionado(c.data);
-            } })),
-        showChuvaLimite && (React.createElement(ChuvaLimiteModal, { codigo: chuvaUrl, limiteAtual: limiteChuva, diasAtual: chuvaPlan && chuvaPlan.diasConsiderados, onClose: () => setShowChuvaLimite(false), onSalvo: () => { setShowChuvaLimite(false); atualizarChuva(chuvaUrl); } })),
-        showChuvaConfig && (React.createElement(ChuvaConfigModal, { urlAtual: chuvaUrl, onClose: () => setShowChuvaConfig(false), onSave: (u) => {
-                salvarChuvaUrl(u);
-                setChuvaUrl(u);
-                if (!u) { setChuvaPlan(null); setChuvaMsg(""); }
-                setShowChuvaConfig(false);
-            } })),
         showForm && (React.createElement(AgendamentoForm, { talhoes: talhoes, compras: compras, dataInicial: diaSelecionado, onClose: () => setShowForm(false), onSave: (a) => {
                 if (a.multiplos) {
                     onAddAgendamentoEmLote(a.registros);
@@ -5766,7 +5804,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
             ["Aviso de chuva", "Quando a chance de chuva de hoje chega a 60% ou mais, aparece um lembrete azul avisando pra pensar duas vezes antes de pulverizar defensivo ou herbicida."],
         ] },
         { id: "calendario", titulo: "Calend\u00E1rio, agendamentos e avisos", itens: [
-            ["Chuva e pluvi\u00F4metro", "Abaixo do calend\u00E1rio, o cart\u00E3o azul \"Chuva\" mostra os totais de hoje, do m\u00EAs e do ano, um gr\u00E1fico de barras com a chuva de cada dia (toque numa barra pra escolher o dia) e quantos mm choveram no dia selecionado. Os dias com chuva ganham um n\u00FAmero azul no calend\u00E1rio. Toque em \"Lan\u00E7ar chuva\" pra anotar na m\u00E3o (vale mais que o pluvi\u00F4metro no mesmo dia). Com o pluvi\u00F4metro digital: ligue o aparelho, conecte ele no Wi-Fi pelo celular (rede \"Pluviometro-...\"), toque em \"Conectar pluvi\u00F4metro\" e digite o c\u00F3digo da etiqueta. A chuva passa a aparecer sozinha. Se chover acima do limite (12 mm por padr\u00E3o, toque em Alterar), o app avisa que d\u00E1 pra pular a irriga\u00E7\u00E3o."],
+            ["Chuva e pluvi\u00F4metro", "Em In\u00EDcio, na aba Tempo (Previs\u00E3o do Tempo), o cart\u00E3o azul \"Chuva\" mostra os totais de hoje, do m\u00EAs e do ano, um gr\u00E1fico de barras com a chuva de cada dia (toque numa barra pra escolher o dia) e quantos mm choveram no dia selecionado. Os dias com chuva ganham um n\u00FAmero azul no calend\u00E1rio. Toque em \"Lan\u00E7ar chuva\" pra anotar na m\u00E3o (vale mais que o pluvi\u00F4metro no mesmo dia). Com o pluvi\u00F4metro digital: ligue o aparelho, conecte ele no Wi-Fi pelo celular (rede \"Pluviometro-...\"), toque em \"Conectar pluvi\u00F4metro\" e digite o c\u00F3digo da etiqueta. A chuva passa a aparecer sozinha. Se chover acima do limite (12 mm por padr\u00E3o, toque em Alterar), o app avisa que d\u00E1 pra pular a irriga\u00E7\u00E3o."],
             ["Car\u00EAncia", "Ao registrar uma aplica\u00E7\u00E3o de defensivo (fungicida, inseticida) ou de herbicida, voc\u00EA pode informar o per\u00EDodo de car\u00EAncia em dias \u2014 \u00E9 opcional. Se preencher, o Calend\u00E1rio mostra, abaixo do cart\u00E3o de chuva, uma barra de progresso pra cada produto: ela come\u00E7a cheia e vermelha e vai diminuindo e ficando verde conforme os dias passam, at\u00E9 sumir quando a car\u00EAncia acaba. Se voc\u00EA aplicou mais de um produto, cada um aparece com a sua barra, j\u00E1 que a car\u00EAncia muda de produto pra produto. Sem car\u00EAncia preenchida, n\u00E3o aparece nada."],
             ["\u00CDcones", "Saco de adubo =aduba\u00E7\u00E3o, gota = irriga\u00E7\u00E3o, bichinho = defensivo. A cor da bolinha diz o estado: azul (agendado, data no futuro), vermelho (atrasado \u2014 a data j\u00E1 passou e ningu\u00E9m marcou como conclu\u00EDdo), verde ou laranja (j\u00E1 feito)."],
             ["Agendar", "Abra o {{Calend\u00E1rio|calendario}}, toque em \"Agendar aplica\u00E7\u00E3o\" e escolha a data, o talh\u00E3o (ou todos de uma vez, se for a mesma aplica\u00E7\u00E3o em v\u00E1rios), a forma (via solo, foliar, fertirriga\u00E7\u00E3o, irriga\u00E7\u00E3o ou outro) e o produto do estoque. \u00C9 s\u00F3 um lembrete pra n\u00E3o esquecer \u2014 n\u00E3o lan\u00E7a custo nem desconta estoque nesse momento."],
@@ -5784,10 +5822,10 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
         { id: "pluviometro", titulo: "\uD83D\uDCA7 Pluvi\u00F4metro digital", itens: [
             ["Como funciona", "Um pluvi\u00F4metro de bal\u00E2ncim (dois fios) ligado a um ESP32 com Wi-Fi conta cada bascu\u00E0da, soma os mm do dia e envia pro servidor do NutriCaf\u00E9. O app l\u00EA de l\u00E1 \u2014 voc\u00EA n\u00E3o precisa de planilha nem de conta extra."],
             ["Ligar e conectar", "Ligue o aparelho na tomada (fonte 5V). No celular, abra o Wi-Fi e entre na rede \"Pluviometro-XXXX\" (sem senha); a p\u00E1gina de configura\u00E7\u00E3o abre sozinha. Escolha o Wi-Fi da sua casa ou sede, digite a senha e salve. O LED fica aceso fixo quando conectar."],
-            ["Conectar no app", "No Calend\u00E1rio, cart\u00E3o Chuva, toque em \"Conectar pluvi\u00F4metro\" e digite o c\u00F3digo da etiqueta do aparelho (formato XXXX-XXXX). A chuva passa a aparecer sozinha, no calend\u00E1rio e na aba Tempo."],
+            ["Conectar no app", "Em In\u00EDcio, aba Tempo, cart\u00E3o Chuva, toque em \"Conectar pluvi\u00F4metro\" e digite o c\u00F3digo da etiqueta do aparelho (formato XXXX-XXXX). A chuva passa a aparecer sozinha, no calend\u00E1rio e na aba Tempo."],
             ["Limite pra irrigar", "Em \"Alterar\" voc\u00EA define quantos mm de chuva bastam pra pular a irriga\u00E7\u00E3o (padr\u00E3o 12 mm) e se conta s\u00F3 hoje ou hoje e ontem. Passou do limite, o app avisa."],
             ["Sem sinal", "Se o aparelho ficar mais de 3 horas sem enviar dados, o app avisa \"sem sinal\". Confira a energia e o Wi-Fi. Pra trocar de Wi-Fi, segure o bot\u00E3o BOOT por 5 segundos."],
-            ["Sem pluvi\u00F4metro digital", "Um pluvi\u00F4metro comum de ler a r\u00E9gua tamb\u00E9m serve: no Calend\u00E1rio, toque num dia e em \"Lan\u00E7ar chuva\"."],
+            ["Sem pluvi\u00F4metro digital", "Um pluvi\u00F4metro comum de ler a r\u00E9gua tamb\u00E9m serve: na aba Tempo, toque num dia (barra) e em \"Lan\u00E7ar chuva\"."],
         ] },
         { id: "estoque", titulo: "Financeiro (compras, estoque e receitas)", itens: [
             ["Compras", "Abra {{Financeiro|financeiro}} e registre o que comprou: categoria (Adubo, Defensivo, Herbicida, Material, Equipamento ou Outro), quantidade, unidade e pre\u00E7o. A busca de produto reconhece uma base grande de formulados, micronutrientes, defensivos, herbicidas e marcas comerciais, preenchendo a composi\u00E7\u00E3o (N-P-K) sozinha quando encontra \u2014 se n\u00E3o encontrar, \u00E9 s\u00F3 digitar o nome e, se quiser, a composi\u00E7\u00E3o na m\u00E3o (calc\u00E1rio, por exemplo, n\u00E3o tem N-P-K, pode deixar em branco). Ao escolher Material ou Equipamento, os campos de composi\u00E7\u00E3o/formula\u00E7\u00E3o somem sozinhos (n\u00E3o fazem sentido pra enxada, mangueira etc) e a unidade padr\u00E3o j\u00E1 vem como \"unidade(s)\" em vez de \"sacos\"."],
@@ -6179,15 +6217,6 @@ function PrevisaoTempoCard() {
     const [diaSelecionado, setDiaSelecionado] = useState(0);
     const [buscando, setBuscando] = useState(false);
     const [termoBusca, setTermoBusca] = useState("");
-    const [chuvaMed, setChuvaMed] = useState(() => lerChuvaCache());
-    const [chuvaMan, setChuvaMan] = useState([]);
-    useEffect(() => {
-        let vivo = true;
-        loadListSincronizado("chuva_manual").then((l) => { if (vivo) setChuvaMan(Array.isArray(l) ? l : []); });
-        const f = lerChuvaUrl();
-        if (f) buscarChuvaPlanilha(f).then((d) => { if (vivo) setChuvaMed(d); }).catch(() => { });
-        return () => { vivo = false; };
-    }, []);
     const [resultadosBusca, setResultadosBusca] = useState([]);
     const [editandoLocal, setEditandoLocal] = useState(false);
     const salvarLocal = (l) => {
@@ -6321,25 +6350,6 @@ function PrevisaoTempoCard() {
                             React.createElement("p", { className: "text-[10px] text-stone-400" }, "volume de chuva"))));
             })(),
             previsao.dias[0] && previsao.dias[0].chuvaPct >= 60 && (React.createElement("p", { className: "text-xs text-[#33628a] bg-[#e5eef5] rounded-lg px-3 py-2 mt-3" }, "\ud83d\udca7 Alta chance de chuva hoje \u2014 vale pensar duas vezes antes de pulverizar defensivo ou herbicida.")))),
-        (() => {
-            const mapa = {};
-            if (chuvaMed && chuvaMed.dias) Object.keys(chuvaMed.dias).forEach((d) => { mapa[d] = chuvaMed.dias[d]; });
-            chuvaMan.forEach((c) => { mapa[c.data] = Number(c.mm) || 0; });
-            const agora = new Date();
-            const iso = (dt) => dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
-            const hojeI = iso(agora), pref = hojeI.slice(0, 7);
-            let mes = 0, dias = 0;
-            Object.keys(mapa).forEach((d) => { if (d.indexOf(pref) === 0 && mapa[d] > 0) { mes += mapa[d]; dias++; } });
-            const tem = Object.keys(mapa).length > 0;
-            const nomeMes = MESES_NOME[agora.getMonth()];
-            return React.createElement("p", { className: "text-xs text-stone-500 mt-3 flex flex-wrap items-center gap-x-1.5" },
-                React.createElement("span", null, "\uD83D\uDCA7 Chuva medida:"),
-                tem ? React.createElement(React.Fragment, null,
-                    React.createElement("span", null, "hoje ", React.createElement("b", { className: "text-[#33628a]" }, fmtMm(mapa[hojeI] || 0) + " mm")),
-                    React.createElement("span", null, "\u00B7"),
-                    React.createElement("span", null, nomeMes.toLowerCase() + " ", React.createElement("b", { className: "text-[#33628a]" }, fmtMm(mes) + " mm"), " (" + dias + (dias === 1 ? " dia)" : " dias)")))
-                    : React.createElement("span", { className: "text-stone-400" }, "sem registro (lance no Calend\u00E1rio)"));
-        })(),
         React.createElement("p", { className: "text-[10px] text-stone-300 mt-2" }, "Fonte: Open-Meteo")));
 }
 function SecaoRecolhivel({ id, titulo, resumo, abertaPadrao, children }) {
@@ -7601,7 +7611,7 @@ function App() {
                     React.createElement(Icon, { name: "alert", size: 14 }),
                     " Ativar avisos de atraso neste aparelho")),
                 aba === "cafe" && React.createElement(CotacaoCard, null),
-                aba === "tempo" && React.createElement(PrevisaoTempoCard, null),
+                aba === "tempo" && React.createElement(React.Fragment, null, React.createElement(PrevisaoTempoCard, null), React.createElement("div", { className: "mt-3" }, React.createElement(CartaoChuva, null))),
                 aba === "lavoura" && talhoes.length > 0 && React.createElement(ResumoLavouraCard, { talhoes: talhoes }),
                 aba === "inicio" && React.createElement("div", { className: "grid grid-cols-2 gap-3" },
                     React.createElement(AcaoTile, { icon: "calculator", cor: "#33422e", corFundo: "#e7ebdd", label: "Calcular dose", onClick: () => setShowCalculadoras(true) }),
