@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-08-v151-chuva-manual-servidor";
+const APP_VERSION = "build-2026-11-08-v152-chuva-irrigacao";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -4618,8 +4618,9 @@ async function buscarChuvaPlanilha(fonte) {
 }
 // manda o lançamento manual pro servidor (o app de irrigação lê de lá). mm = null apaga o dia.
 function enviarChuvaManual(fonte, data, mm) {
-    if (!ehCodigoChuva(fonte)) return;
-    try { fetch("/.netlify/functions/chuva", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codigo: normalizaCodigoChuva(fonte), acao: "manual", data: data, mm: mm }) }).catch(function () { }); } catch (e) { }
+    if (!ehCodigoChuva(fonte)) return Promise.resolve();
+    try { return fetch("/.netlify/functions/chuva", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codigo: normalizaCodigoChuva(fonte), acao: "manual", data: data, mm: mm }) }).catch(function () { }); } catch (e) { }
+    return Promise.resolve();
 }
 async function salvarLimiteChuva(codigo, limite, dias) {
     const res = await fetch("/.netlify/functions/chuva", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codigo: normalizaCodigoChuva(codigo), acao: "config", limite: String(limite), dias_considerados: dias }) });
@@ -4820,7 +4821,7 @@ function CartaoChuva() {
     useEffect(() => {
         if (!ehCodigoChuva(chuvaUrl) || !chuvaManual.length) return;
         const corte = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
-        chuvaManual.forEach((c) => { if (c.data >= corte) enviarChuvaManual(chuvaUrl, c.data, Number(c.mm) || 0); });
+        Promise.all(chuvaManual.filter((c) => c.data >= corte).map((c) => enviarChuvaManual(chuvaUrl, c.data, Number(c.mm) || 0))).then(() => atualizarChuva(chuvaUrl));
     }, [chuvaUrl, chuvaManual.length]);
     const salvarChuvaManual = (lista) => { setChuvaManual(lista); saveList("chuva_manual", lista); };
     const chuvaPorDia = {};
@@ -5875,7 +5876,8 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
             ["Conectar no app", "Em In\u00EDcio, aba Tempo, cart\u00E3o Chuva, toque em \"Conectar pluvi\u00F4metro\" e digite o c\u00F3digo da etiqueta do aparelho (formato XXXX-XXXX). A chuva passa a aparecer sozinha, no calend\u00E1rio e na aba Tempo."],
             ["Limite pra irrigar", "Em \"Alterar\" voc\u00EA define quantos mm de chuva bastam pra pular a irriga\u00E7\u00E3o (padr\u00E3o 12 mm) e se conta s\u00F3 hoje ou hoje e ontem. Passou do limite, o app avisa."],
             ["Sem sinal", "Se o aparelho ficar mais de 3 horas sem enviar dados, o app avisa \"sem sinal\". Confira a energia e o Wi-Fi. Pra trocar de Wi-Fi, segure o bot\u00E3o BOOT por 5 segundos."],
-            ["Sem pluvi\u00F4metro digital", "Um pluvi\u00F4metro comum de ler a r\u00E9gua tamb\u00E9m serve: na aba Tempo, toque num dia (barra) e em \"Lan\u00E7ar chuva\"."],
+            ["Sem pluvi\u00F4metro digital", "Um pluvi\u00F4metro comum de ler a r\u00E9gua tamb\u00E9m serve: na aba Tempo, toque num dia (barra) e em \"Lan\u00E7ar chuva\". Se o c\u00F3digo estiver conectado, o lan\u00E7amento vai tamb\u00E9m pro servidor e vale mais que o pluvi\u00F4metro naquele dia."],
+            ["Ligar com o app de irriga\u00E7\u00E3o", "No app de Irriga\u00E7\u00E3o, em Configura\u00E7\u00F5es, cole o mesmo c\u00F3digo no campo \"Pluvi\u00F4metro\". O Início do app de irriga\u00E7\u00E3o passa a mostrar a chuva de hoje e de ontem e avisa \"Pular a rega\" quando passa do limite. Se voc\u00EA tentar ligar a bomba nesse caso, ele pede confirma\u00E7\u00E3o."],
         ] },
         { id: "estoque", titulo: "Financeiro (compras, estoque e receitas)", itens: [
             ["Compras", "Abra {{Financeiro|financeiro}} e registre o que comprou: categoria (Adubo, Defensivo, Herbicida, Material, Equipamento ou Outro), quantidade, unidade e pre\u00E7o. A busca de produto reconhece uma base grande de formulados, micronutrientes, defensivos, herbicidas e marcas comerciais, preenchendo a composi\u00E7\u00E3o (N-P-K) sozinha quando encontra \u2014 se n\u00E3o encontrar, \u00E9 s\u00F3 digitar o nome e, se quiser, a composi\u00E7\u00E3o na m\u00E3o (calc\u00E1rio, por exemplo, n\u00E3o tem N-P-K, pode deixar em branco). Ao escolher Material ou Equipamento, os campos de composi\u00E7\u00E3o/formula\u00E7\u00E3o somem sozinhos (n\u00E3o fazem sentido pra enxada, mangueira etc) e a unidade padr\u00E3o j\u00E1 vem como \"unidade(s)\" em vez de \"sacos\"."],
