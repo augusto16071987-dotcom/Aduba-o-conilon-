@@ -45,8 +45,8 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-10-29-v147-abas-ferramentas";
-const APP_UPDATED_AT = "28/10/2026";
+const APP_VERSION = "build-2026-10-29-v149-aviso-comunidade";
+const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
    ÍCONES — SVGs simples embutidos (sem dependência externa)
@@ -1234,6 +1234,31 @@ async function buscarMensagensComunidade(limite) {
         console.error("Erro ao buscar mensagens da comunidade", e);
         return [];
     }
+}
+
+const COMUNIDADE_VISTO_KEY = STORAGE_PREFIX + "comunidade_visto";
+function marcarComunidadeVista() { try { localStorage.setItem(COMUNIDADE_VISTO_KEY, new Date().toISOString()); } catch (e) { } }
+// Pergunta só pela mensagem mais nova (sem baixar fotos) — usada pra bolinha de aviso.
+async function buscarUltimaComunidade() {
+    if (!syncAtivo()) return null;
+    try {
+        const res = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents:runQuery`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ structuredQuery: {
+                from: [{ collectionId: COMUNIDADE_COLECAO }],
+                select: { fields: [{ fieldPath: "criadoEm" }, { fieldPath: "autorNome" }] },
+                orderBy: [{ field: { fieldPath: "criadoEm" }, direction: "DESCENDING" }],
+                limit: 1,
+            } }),
+        });
+        const linhas = await res.json();
+        const l = (linhas || []).find((x) => x.document);
+        if (!l) return null;
+        const f = l.document.fields || {};
+        return { criadoEm: f.criadoEm ? f.criadoEm.stringValue : "", autorNome: f.autorNome ? f.autorNome.stringValue : "" };
+    }
+    catch (e) { return null; }
 }
 
 async function enviarMensagemComunidade({ texto, autorNome, tipo, fotoBase64, arquivoBase64, arquivoNome }) {
@@ -5775,9 +5800,9 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
             ["Regra de ouro", "AGENDAR (no {{Calend\u00E1rio|calendario}}) \u00E9 s\u00F3 planejar uma data. REGISTRAR (nas abas Aduba\u00E7\u00E3o, Pragas ou Manejo do talh\u00E3o) \u00E9 confirmar que aquilo realmente aconteceu. S\u00F3 o registro entra no custo, no estoque e no hist\u00F3rico \u2014 um agendamento sozinho n\u00E3o muda nada disso."],
         ] },
         { id: "tela", titulo: "Tela inicial (4 abas)", itens: [
-            ["As abas", "No topo da tela inicial ficam quatro abas: In\u00EDcio (avisos e bot\u00F5es Calcular dose, Financeiro, Calend\u00E1rio e Relat\u00F3rio), Pre\u00E7o (cota\u00E7\u00E3o do caf\u00E9), Tempo (previs\u00E3o e chuva medida) e Lavoura (resumo e lista de talh\u00F5es). O app lembra a \u00FAltima aba que voc\u00EA deixou aberta. Uma bolinha vermelha em In\u00EDcio avisa quando h\u00E1 aplica\u00E7\u00E3o atrasada."],
+            ["As abas", "No topo da tela inicial ficam quatro abas: In\u00edcio (resumo da lavoura e lista de talh\u00f5es, onde voc\u00ea cadastra e abre cada talh\u00e3o), Pre\u00e7o (cota\u00e7\u00e3o do caf\u00e9), Tempo (previs\u00e3o do tempo e cart\u00e3o de Chuva) e Ferramentas (Calcular dose, Financeiro, Calend\u00e1rio, Relat\u00f3rio e os avisos de atraso e de estoque). O app lembra a \u00faltima aba que voc\u00ea deixou aberta. Uma bolinha vermelha em Ferramentas avisa quando h\u00e1 aplica\u00e7\u00e3o atrasada."],
             ["Resumo da lavoura", "Na aba In\u00EDcio, o cart\u00E3o de resumo mostra a \u00E1rea total em hectares e o total de p\u00E9s de planta de todos os talh\u00F5es, e logo abaixo o detalhe separado por cultura (quantos talh\u00F5es, hectares e p\u00E9s de cada uma). Os p\u00E9s v\u00EAm do n\u00FAmero de plantas cadastrado em cada talh\u00E3o; se um talh\u00E3o estiver sem esse n\u00FAmero, aparece \"p\u00E9s n\u00E3o informados\"."],
-            ["Chuva medida", "Na aba Tempo, abaixo da previs\u00E3o, uma linha mostra quantos mm choveram hoje e no m\u00EAs, somando o pluvi\u00F4metro digital e o que voc\u00EA lan\u00E7ou na m\u00E3o no Calend\u00E1rio."],
+            ["Chuva medida", "Na aba Tempo, abaixo da previs\u00e3o, fica o cart\u00e3o azul \u201cChuva\u201d: totais de hoje, do m\u00eas e do ano, gr\u00e1fico de barras por dia e o bot\u00e3o \u201cLan\u00e7ar chuva\u201d. Soma o pluvi\u00f4metro digital com o que voc\u00ea lan\u00e7ou na m\u00e3o."],
         ] },
         { id: "talhao", titulo: "Dentro do talh\u00E3o (5 abas)", itens: [
             ["Recomend.", "Quanto de N, P e K aplicar, pela fonte escolhida no cadastro do talh\u00E3o. Pra Caf\u00E9 Conilon: Funda\u00E7\u00E3o Proc\u00E1f\u00E9 (padr\u00E3o, calcula por f\u00F3rmula direta a partir da produtividade esperada), Embrapa (tabela por faixa, com micronutrientes), INCAPER-ES (tabela cl\u00E1ssica do Esp\u00EDrito Santo) ou uma tabela sua. Pra Caf\u00E9 Ar\u00E1bica: Boletim 100 do IAC, a refer\u00EAncia oficial de SP \u2014 mas essa exige que a an\u00E1lise de solo esteja marcada como m\u00E9todo \"Resina\" (veja o item abaixo). As outras culturas ainda n\u00E3o t\u00EAm tabela oficial implementada; enquanto isso, use uma tabela sua. D\u00E1 pra trocar a fonte a qualquer momento editando o talh\u00E3o (\u00EDcone de l\u00E1pis no card, na tela inicial). Cada nutriente vem com uma barra de meta x j\u00E1 aplicado, que soma automaticamente tudo que voc\u00EA j\u00E1 registrou na aba Aduba\u00E7\u00E3o. Quando um nutriente j\u00E1 est\u00E1 \"Alto\" no solo (segundo a \u00FAltima an\u00E1lise), a barra fica vermelha e cheia avisando que n\u00E3o precisa aplicar mais, em vez de ficar vazia como se voc\u00EA ainda n\u00E3o tivesse feito nada. Se voc\u00EA tiver agendamentos com quantidade prevista informada, a barra tamb\u00E9m mostra uma sombra mais clara \u2014 uma previs\u00E3o de at\u00E9 onde voc\u00EA chega se cumprir o que j\u00E1 est\u00E1 agendado, al\u00E9m do que j\u00E1 foi de fato aplicado."],
@@ -5791,8 +5816,9 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
         ] },
         { id: "calc", titulo: "Calculadoras de dose", itens: [
             ["Pra que serve", "Responde duas perguntas na hora de ir pro campo: \"quanto de produto eu preciso no total, pro talh\u00E3o inteiro?\" e \"quanto ponho em cada bomba, pra bater certinho com a calibra\u00E7\u00E3o do meu pulverizador?\". \u00C9 uma ferramenta de c\u00E1lculo \u2014 n\u00E3o registra nada sozinha."],
-            ["Como usar", "Abra em {{Calculadoras de dose|calculadoras}}. Escolha a base (por hectare ou por planta), informe a \u00E1rea ou o n\u00FAmero de plantas, a calibra\u00E7\u00E3o (capacidade da bomba e quantas plantas/\u00E1rea cada bombada cobre, ou o volume de calda por hectare) e a dose recomendada na bula do produto. O resultado (quanto comprar, quanto por bombada) aparece sozinho conforme voc\u00EA digita, sem precisar apertar nenhum bot\u00E3o de calcular."],
+            ["Como usar", "Abra em {{Calculadoras de dose|calculadoras}}. Escolha o talh\u00e3o \u2014 ou \u201cTodos os talh\u00f5es\u201d, que usa a \u00e1rea e as plantas somadas da lavoura inteira \u2014 e a base da dose: por hectare, por planta ou por bomba. Informe a calibra\u00e7\u00e3o (capacidade da bomba e quantas plantas/\u00e1rea cada bombada cobre, ou o volume de calda por hectare) e a dose recomendada na bula do produto. O resultado (quanto comprar, quanto por bombada) aparece sozinho conforme voc\u00ea digita, sem precisar apertar nenhum bot\u00e3o de calcular."],
             ["Tr\u00EAs abas", "Solo (dose em mL ou g por planta, direto no solo/raiz) mostra tamb\u00E9m quantos sacos comprar (peso do saco configur\u00E1vel). Foliar (dose por hectare/planta + volume de calda em L/ha, pra pulveriza\u00E7\u00E3o na folha) n\u00E3o tem campo de peso de saco, j\u00E1 que normalmente \u00E9 produto l\u00EDquido. Fertirriga\u00E7\u00E3o considera quantas plantas cada bomba/setor de irriga\u00E7\u00E3o atende."],
+            ["Dose por bomba", "Quando a recomenda\u00e7\u00e3o vem \u201cpor bomba\u201d (ex.: 100 mL por bomba), escolha a base Bomba e informe a dose por bomba e o esguicho por p\u00e9 (ex.: 50 mL). O app calcula quantas bombas voc\u00ea vai gastar e o total de produto que precisa comprar para o talh\u00e3o \u2014 ou para todos os talh\u00f5es juntos."],
             ["Misturar produtos", "Toque em \"Adicionar outro produto na mistura\" pra calcular v\u00E1rios produtos juntos na mesma calda \u2014 \u00FAtil quando voc\u00EA vai aplicar um adubo foliar e um defensivo na mesma pulveriza\u00E7\u00E3o, por exemplo."],
             ["Baixar e compartilhar", "O resultado final tem os bot\u00F5es Baixar PDF e Compartilhar \u2014 \u00FAteis pra guardar ou mandar direto pro WhatsApp de quem for aplicar (um funcion\u00E1rio, por exemplo), sem precisar ele entrar no app."],
             ["Importante", "A calculadora s\u00F3 calcula \u2014 n\u00E3o registra nada no hist\u00F3rico nem desconta do estoque. Depois de aplicar de verdade no campo, v\u00E1 na aba Aduba\u00E7\u00E3o, Pragas ou Manejo (herbicida) do talh\u00E3o e registre l\u00E1, pra entrar no custo e no estoque."],
@@ -5804,8 +5830,8 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
             ["Aviso de chuva", "Quando a chance de chuva de hoje chega a 60% ou mais, aparece um lembrete azul avisando pra pensar duas vezes antes de pulverizar defensivo ou herbicida."],
         ] },
         { id: "calendario", titulo: "Calend\u00E1rio, agendamentos e avisos", itens: [
-            ["Chuva e pluvi\u00F4metro", "Em In\u00EDcio, na aba Tempo (Previs\u00E3o do Tempo), o cart\u00E3o azul \"Chuva\" mostra os totais de hoje, do m\u00EAs e do ano, um gr\u00E1fico de barras com a chuva de cada dia (toque numa barra pra escolher o dia) e quantos mm choveram no dia selecionado. Os dias com chuva ganham um n\u00FAmero azul no calend\u00E1rio. Toque em \"Lan\u00E7ar chuva\" pra anotar na m\u00E3o (vale mais que o pluvi\u00F4metro no mesmo dia). Com o pluvi\u00F4metro digital: ligue o aparelho, conecte ele no Wi-Fi pelo celular (rede \"Pluviometro-...\"), toque em \"Conectar pluvi\u00F4metro\" e digite o c\u00F3digo da etiqueta. A chuva passa a aparecer sozinha. Se chover acima do limite (12 mm por padr\u00E3o, toque em Alterar), o app avisa que d\u00E1 pra pular a irriga\u00E7\u00E3o."],
-            ["Car\u00EAncia", "Ao registrar uma aplica\u00E7\u00E3o de defensivo (fungicida, inseticida) ou de herbicida, voc\u00EA pode informar o per\u00EDodo de car\u00EAncia em dias \u2014 \u00E9 opcional. Se preencher, o Calend\u00E1rio mostra, abaixo do cart\u00E3o de chuva, uma barra de progresso pra cada produto: ela come\u00E7a cheia e vermelha e vai diminuindo e ficando verde conforme os dias passam, at\u00E9 sumir quando a car\u00EAncia acaba. Se voc\u00EA aplicou mais de um produto, cada um aparece com a sua barra, j\u00E1 que a car\u00EAncia muda de produto pra produto. Sem car\u00EAncia preenchida, n\u00E3o aparece nada."],
+            ["Chuva e pluvi\u00f4metro", "Os dias com chuva ganham um n\u00famero azul (mm) no calend\u00e1rio. Pra lan\u00e7ar chuva, ver os totais ou conectar o pluvi\u00f4metro, v\u00e1 em In\u00edcio > aba Tempo > cart\u00e3o Chuva."],
+            ["Car\u00eancia", "Ao registrar uma aplica\u00e7\u00e3o de defensivo (fungicida, inseticida) ou de herbicida, voc\u00ea pode informar o per\u00edodo de car\u00eancia em dias \u2014 \u00e9 opcional. Se preencher, o Calend\u00e1rio mostra uma barra de progresso pra cada produto: ela come\u00e7a cheia e vermelha e vai diminuindo e ficando verde conforme os dias passam, at\u00e9 sumir quando a car\u00eancia acaba. Se voc\u00ea aplicou mais de um produto, cada um aparece com a sua barra, j\u00e1 que a car\u00eancia muda de produto pra produto. Sem car\u00eancia preenchida, n\u00e3o aparece nada."],
             ["\u00CDcones", "Saco de adubo =aduba\u00E7\u00E3o, gota = irriga\u00E7\u00E3o, bichinho = defensivo. A cor da bolinha diz o estado: azul (agendado, data no futuro), vermelho (atrasado \u2014 a data j\u00E1 passou e ningu\u00E9m marcou como conclu\u00EDdo), verde ou laranja (j\u00E1 feito)."],
             ["Agendar", "Abra o {{Calend\u00E1rio|calendario}}, toque em \"Agendar aplica\u00E7\u00E3o\" e escolha a data, o talh\u00E3o (ou todos de uma vez, se for a mesma aplica\u00E7\u00E3o em v\u00E1rios), a forma (via solo, foliar, fertirriga\u00E7\u00E3o, irriga\u00E7\u00E3o ou outro) e o produto do estoque. \u00C9 s\u00F3 um lembrete pra n\u00E3o esquecer \u2014 n\u00E3o lan\u00E7a custo nem desconta estoque nesse momento."],
             ["Agendar v\u00E1rias datas de uma vez", "No formul\u00E1rio de agendamento, toque em \"+ Adicionar outra data\" pra empilhar v\u00E1rias datas de uma s\u00F3 vez \u2014 \u00FAtil pra fertirriga\u00E7\u00E3o semanal, por exemplo. O app cria um agendamento separado pra cada combina\u00E7\u00E3o de data, talh\u00E3o e produto, e o bot\u00E3o final mostra quantos vai criar."],
@@ -5815,9 +5841,9 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
             ["Quantidade no card do dia", "Ao tocar num dia do {{Calend\u00E1rio|calendario}}, cada aplica\u00E7\u00E3o mostra uma etiqueta verde ao lado do nome do produto com a quantidade total pra aquele setor (kg ou L) \u2014 j\u00E1 convertida quando o agendamento foi feito em dose por hectare ou por planta. Aparece nos agendamentos, nas aduba\u00E7\u00F5es j\u00E1 registradas e nos defensivos, do lado do bot\u00E3o Conclu\u00EDdo."],
             ["Concluir", "Ao tocar num dia com agendamento e marcar como conclu\u00EDdo, o app abre o registro de verdade j\u00E1 preenchido com data e produto \u2014 voc\u00EA s\u00F3 confirma a quantidade (e, se for calc\u00E1rio ou adubo em v\u00E1rios talh\u00F5es, em quais setores entrou). Ao salvar, a\u00ED sim entra no hist\u00F3rico, no custo e desconta do estoque, e o agendamento some da lista de pendentes."],
             ["\u00C9pocas do ano", "No fim da tela tem um quadro de refer\u00EAncia (tipo um calend\u00E1rio agr\u00EDcola) mostrando em quais meses cada atividade costuma ser recomendada pro caf\u00E9 conilon \u2014 an\u00E1lise de solo, aduba\u00E7\u00E3o, poda, colheita, controle de pragas espec\u00EDficas, etc. \u00C9 s\u00F3 uma refer\u00EAncia geral, vale ajustar pro clima da sua regi\u00E3o."],
-            ["Aviso de atraso", "Na tela inicial, um card vermelho aparece automaticamente sempre que tiver algum agendamento atrasado (data j\u00E1 passou e n\u00E3o foi marcado como conclu\u00EDdo), com o nome do talh\u00E3o e o que falta fazer. Toque no card pra ir direto ao Calend\u00E1rio e resolver."],
+            ["Aviso de atraso", "Na aba Ferramentas da tela inicial, um card vermelho aparece automaticamente sempre que tiver algum agendamento atrasado (data j\u00e1 passou e n\u00e3o foi marcado como conclu\u00eddo), com o nome do talh\u00e3o e o que falta fazer. Toque no card pra ir direto ao Calend\u00e1rio e resolver."],
             ["Aviso do dia da aplica\u00E7\u00E3o", "Al\u00E9m do aviso de atraso, um card azul separado aparece quando algo est\u00E1 agendado exatamente para hoje \u2014 avisando no pr\u00F3prio dia, sem esperar atrasar pra voc\u00EA ficar sabendo."],
-            ["Notifica\u00E7\u00E3o no aparelho", "O bot\u00E3o \"Ativar avisos de atraso neste aparelho\" pede permiss\u00E3o de notifica\u00E7\u00E3o do navegador. Uma vez ativado, chega uma notifica\u00E7\u00E3o tanto quando algo atrasa quanto no dia em que algo est\u00E1 agendado (no m\u00E1ximo uma vez por dia, pra cada caso). S\u00F3 funciona com o app aberto no navegador \u2014 n\u00E3o \u00E9 um aviso que chega com o app fechado, porque isso precisaria de um servidor por tr\u00E1s, que o app n\u00E3o tem."],
+            ["Notifica\u00e7\u00e3o no aparelho", "O bot\u00e3o \u201cAtivar avisos de atraso neste aparelho\u201d (na aba Ferramentas) pede permiss\u00e3o de notifica\u00e7\u00e3o do navegador. Uma vez ativado, chega uma notifica\u00e7\u00e3o tanto quando algo atrasa quanto no dia em que algo est\u00e1 agendado (no m\u00e1ximo uma vez por dia, pra cada caso). S\u00f3 funciona com o app aberto no navegador \u2014 n\u00e3o \u00e9 um aviso que chega com o app fechado, porque isso precisaria de um servidor por tr\u00e1s, que o app n\u00e3o tem."],
         ] },
         { id: "pluviometro", titulo: "\uD83D\uDCA7 Pluvi\u00F4metro digital", itens: [
             ["Como funciona", "Um pluvi\u00F4metro de bal\u00E2ncim (dois fios) ligado a um ESP32 com Wi-Fi conta cada bascu\u00E0da, soma os mm do dia e envia pro servidor do NutriCaf\u00E9. O app l\u00EA de l\u00E1 \u2014 voc\u00EA n\u00E3o precisa de planilha nem de conta extra."],
@@ -5866,7 +5892,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
         ] },
         { id: "dados", titulo: "Seus dados e backup", itens: [
             ["Salvamento", "Tudo \u00E9 salvo sozinho no celular, sem bot\u00E3o de salvar \u2014 assim que voc\u00EA confirma um cadastro, j\u00E1 fica gravado."],
-            ["Sincroniza\u00E7\u00E3o", "Se ativa (em {{Configura\u00E7\u00F5es|configuracoes}}), os dados v\u00E3o pra nuvem automaticamente, sem precisar fazer nada. Voc\u00EA escolhe de quanto em quanto tempo o app confere a nuvem (padr\u00E3o: 15 minutos) e pode tocar em \u201CSincronizar agora\u201D. Roda enquanto o app est\u00E1 aberto. Anote seu ID de sincroniza\u00E7\u00E3o \u2014 \u00E9 ele que recupera tudo sozinho num celular novo, s\u00F3 de informar o mesmo c\u00F3digo."],
+            ["Sincroniza\u00e7\u00e3o", "Se ativa (em {{Configura\u00e7\u00f5es|configuracoes}}), os dados v\u00e3o pra nuvem automaticamente, sem precisar fazer nada. Voc\u00ea escolhe de quanto em quanto tempo o app confere a nuvem (padr\u00e3o: 15 minutos) e pode tocar em \u201cSincronizar agora\u201d. Roda enquanto o app est\u00e1 aberto. Seu c\u00f3digo de recupera\u00e7\u00e3o (ID de sincroniza\u00e7\u00e3o) vem no e-mail de ativa\u00e7\u00e3o e tamb\u00e9m aparece em Configura\u00e7\u00f5es \u2014 \u00e9 ele que recupera tudo sozinho num celular novo, s\u00f3 de informar o mesmo c\u00f3digo."],
             ["Backup manual", "Em {{Configura\u00E7\u00F5es|configuracoes}} d\u00E1 pra baixar um arquivo .json com todos os dados e restaurar depois \u2014 \u00FAtil como uma segunda camada de seguran\u00E7a al\u00E9m da sincroniza\u00E7\u00E3o, ou se voc\u00EA n\u00E3o quiser usar a nuvem."],
             ["Configura\u00E7\u00F5es organizadas", "A tela de {{Configura\u00E7\u00F5es|configuracoes}} \u00E9 dividida em se\u00E7\u00F5es que abrem e fecham (Meu acesso, Sincroniza\u00E7\u00E3o, Backup, Tabelas de aduba\u00E7\u00E3o) \u2014 toque no t\u00EDtulo de cada uma pra expandir e ver o conte\u00FAdo."],
             ["Bot\u00E3o de voltar do celular", "Agora navega tela por tela dentro do app (igual app nativo) em vez de fechar direto \u2014 s\u00F3 sai de verdade quando voc\u00EA j\u00E1 est\u00E1 na tela inicial."],
@@ -7237,6 +7263,24 @@ function App() {
     const [permissaoNotificacao, setPermissaoNotificacao] = useState(typeof Notification !== "undefined" ? Notification.permission : "unsupported");
     const hojeISO = new Date().toISOString().slice(0, 10);
     const meuNomeComunidade = (() => { const r = lerAtivacao(); return (r && r.nome) || "Anônimo"; })();
+    const [comunidadeNova, setComunidadeNova] = useState(false);
+    useEffect(() => {
+        if (showComunidade) { setComunidadeNova(false); return () => marcarComunidadeVista(); }
+        let vivo = true;
+        const checar = async () => {
+            const r = await buscarUltimaComunidade();
+            if (!vivo || !r || !r.criadoEm) return;
+            let visto = null;
+            try { visto = localStorage.getItem(COMUNIDADE_VISTO_KEY); } catch (e) { }
+            if (!visto) { marcarComunidadeVista(); return; }
+            if (new Date(r.criadoEm).getTime() > new Date(visto).getTime() && r.autorNome !== meuNomeComunidade) setComunidadeNova(true);
+        };
+        checar();
+        const iv = setInterval(checar, 90000);
+        const vis = () => { if (document.visibilityState === "visible") checar(); };
+        document.addEventListener("visibilitychange", vis);
+        return () => { vivo = false; clearInterval(iv); document.removeEventListener("visibilitychange", vis); };
+    }, [showComunidade]);
     const atrasados = talhoes.flatMap((t) => (agendamentos[t.id] || [])
         .filter((a) => !a.concluido && a.data < hojeISO)
         .map((a) => ({ ...a, talhaoNome: t.nome })));
@@ -7573,8 +7617,9 @@ function App() {
                     React.createElement("div", { className: "flex items-center gap-3" },
                         React.createElement("button", { onClick: () => setShowAjuda(true), className: "text-[#cdd7c4] flex items-center gap-1 text-xs font-semibold border border-[#5c6b52] rounded-full px-2.5 py-1", "aria-label": "Ajuda" },
                             "?", " Ajuda"),
-                        React.createElement("button", { onClick: () => setShowComunidade(true), className: "text-[#cdd7c4]", "aria-label": "Comunidade" },
-                            React.createElement(Icon, { name: "chat", size: 20 })),
+                        React.createElement("button", { onClick: () => setShowComunidade(true), className: "text-[#cdd7c4] relative", "aria-label": comunidadeNova ? "Comunidade (mensagens novas)" : "Comunidade" },
+                            React.createElement(Icon, { name: "chat", size: 20 }),
+                            comunidadeNova && React.createElement("span", { className: "absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#e0573d] border border-[#33422e]" })),
                         React.createElement("button", { onClick: () => setShowConfiguracoes(true), className: "text-[#cdd7c4]", "aria-label": "Configura\u00E7\u00F5es" },
                             React.createElement(Icon, { name: "settings", size: 20 })))),
                 React.createElement("p", { className: "text-[#cdd7c4] text-sm mt-1" }, "Controle de talh\u00F5es, an\u00E1lises, pragas e aduba\u00E7\u00E3o da sua lavoura"),
