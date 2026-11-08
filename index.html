@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-10-29-v150-comunidade-editar";
+const APP_VERSION = "build-2026-11-08-v151-chuva-manual-servidor";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -4616,6 +4616,11 @@ async function buscarChuvaPlanilha(fonte) {
     }
     finally { clearTimeout(t); }
 }
+// manda o lançamento manual pro servidor (o app de irrigação lê de lá). mm = null apaga o dia.
+function enviarChuvaManual(fonte, data, mm) {
+    if (!ehCodigoChuva(fonte)) return;
+    try { fetch("/.netlify/functions/chuva", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codigo: normalizaCodigoChuva(fonte), acao: "manual", data: data, mm: mm }) }).catch(function () { }); } catch (e) { }
+}
 async function salvarLimiteChuva(codigo, limite, dias) {
     const res = await fetch("/.netlify/functions/chuva", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codigo: normalizaCodigoChuva(codigo), acao: "config", limite: String(limite), dias_considerados: dias }) });
     const j = await res.json();
@@ -4811,6 +4816,12 @@ function CartaoChuva() {
     };
     useEffect(() => { loadListSincronizado("chuva_manual").then((l) => setChuvaManual(Array.isArray(l) ? l : [])); }, []);
     useEffect(() => { if (chuvaUrl) atualizarChuva(chuvaUrl); }, [chuvaUrl]);
+    // reenvia os lançamentos manuais recentes (de hoje e dos últimos 2 dias) pro servidor
+    useEffect(() => {
+        if (!ehCodigoChuva(chuvaUrl) || !chuvaManual.length) return;
+        const corte = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+        chuvaManual.forEach((c) => { if (c.data >= corte) enviarChuvaManual(chuvaUrl, c.data, Number(c.mm) || 0); });
+    }, [chuvaUrl, chuvaManual.length]);
     const salvarChuvaManual = (lista) => { setChuvaManual(lista); saveList("chuva_manual", lista); };
     const chuvaPorDia = {};
     const origemChuva = {};
@@ -4855,7 +4866,7 @@ function CartaoChuva() {
                 React.createElement("div", { className: "flex items-center justify-between gap-2" },
                     React.createElement("p", { className: "text-sm text-stone-700" },
                         mmDia != null ? React.createElement(React.Fragment, null, React.createElement("b", null, fmtMm(mmDia) + " mm"), " neste dia", React.createElement("span", { className: "text-[11px] text-stone-400" }, origemChuva[diaSelecionado] === "manual" ? " · lançada por você" : " · pluviômetro")) : "Sem chuva registrada neste dia."),
-                    manualDoDia ? React.createElement(AcoesRegistro, { onEdit: () => { setEditandoChuva(manualDoDia); setShowChuvaForm(true); }, onDelete: () => salvarChuvaManual(chuvaManual.filter((c) => c.id !== manualDoDia.id)), confirmMsg: "Apagar a chuva lançada neste dia?" }) : React.createElement("button", { type: "button", onClick: () => { setEditandoChuva(null); setShowChuvaForm(true); }, className: "shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#33628a] text-white text-xs font-semibold active:bg-[#274d6e]" },
+                    manualDoDia ? React.createElement(AcoesRegistro, { onEdit: () => { setEditandoChuva(manualDoDia); setShowChuvaForm(true); }, onDelete: () => { salvarChuvaManual(chuvaManual.filter((c) => c.id !== manualDoDia.id)); enviarChuvaManual(chuvaUrl, manualDoDia.data, null); }, confirmMsg: "Apagar a chuva lançada neste dia?" }) : React.createElement("button", { type: "button", onClick: () => { setEditandoChuva(null); setShowChuvaForm(true); }, className: "shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#33628a] text-white text-xs font-semibold active:bg-[#274d6e]" },
                         React.createElement(Icon, { name: "plus", size: 12 }),
                         "Lançar chuva")),
                 mmDia != null && mmDia >= limiteChuva && React.createElement("p", { className: "text-xs text-[#7a4a12] bg-[#fdf3e0] border border-[#f0d9a8] rounded-lg px-3 py-2" }, "Choveu " + fmtMm(mmDia) + " mm, acima do limite de " + fmtMm(limiteChuva) + " mm — dá pra pular a irrigação deste dia." + (irrigacoesNoDia > 0 ? " Tem " + irrigacoesNoDia + (irrigacoesNoDia === 1 ? " irrigação agendada" : " irrigações agendadas") + " pra hoje." : "")),
@@ -4872,6 +4883,8 @@ function CartaoChuva() {
                 // um lançamento manual por dia: se já existir um nesse dia, ele é trocado
                 const semEsse = chuvaManual.filter((x) => x.id !== c.id && x.data !== c.data);
                 salvarChuvaManual([...semEsse, c]);
+                if (editandoChuva && editandoChuva.data !== c.data) enviarChuvaManual(chuvaUrl, editandoChuva.data, null);
+                enviarChuvaManual(chuvaUrl, c.data, Number(c.mm) || 0);
                 setShowChuvaForm(false);
                 setEditandoChuva(null);
                 setDiaSelecionado(c.data);
