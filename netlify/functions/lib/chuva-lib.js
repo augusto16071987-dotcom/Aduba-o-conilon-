@@ -19,6 +19,11 @@ function dataBR(ms) { return hojeBR(ms); }
 function lerDias(dados) {
     try { const o = JSON.parse(dados.dias || "{}"); return o && typeof o === "object" ? o : {}; } catch (e) { return {}; }
 }
+// lançamentos feitos à mão no app (valem mais que o pluviômetro naquele dia)
+function lerManual(dados) {
+    try { const o = JSON.parse(dados.manual || "{}"); return o && typeof o === "object" ? o : {}; } catch (e) { return {}; }
+}
+function diasTodos(dados) { return Object.assign({}, lerDias(dados), lerManual(dados)); }
 function numero(v, padrao) { const n = Number(String(v).replace(",", ".")); return isFinite(n) ? n : padrao; }
 function configDe(dados) {
     let limite = numero(dados.limite, LIMITE_PADRAO);
@@ -56,7 +61,7 @@ function lista(mapa, desde) {
     return Object.keys(mapa).filter((d) => d >= desde).sort().map((d) => ({ data: d, mm: mapa[d] }));
 }
 function statusIrrigacao(dados, agora) {
-    const mapa = lerDias(dados);
+    const mapa = diasTodos(dados);
     const cfg = configDe(dados);
     const hoje = hojeBR(agora);
     const ontem = hojeBR((agora || Date.now()) - 86400000);
@@ -71,4 +76,4 @@ function statusIrrigacao(dados, agora) {
     };
 }
 
-module.exports = { LIMITE_PADRAO, normalizaCodigo, idDoc, hojeBR, dataBR, lerDias, configDe, podarDias, lerAparelho, atualizar, lista, statusIrrigacao, numero };
+module.exports = { lerManual, diasTodos, LIMITE_PADRAO, normalizaCodigo, idDoc, hojeBR, dataBR, lerDias, configDe, podarDias, lerAparelho, atualizar, lista, statusIrrigacao, numero };
