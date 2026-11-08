@@ -12,6 +12,21 @@ exports.handler = async (event) => {
         const q = event.httpMethod === "GET" ? (event.queryStringParameters || {}) : L.parseBody(event);
         const codigo = C.normalizaCodigo(q.codigo);
         if (!codigo) return L.resp(400, { ok: false, erro: "Código inválido. Ele tem 8 letras/números (ex.: K7QM-4TXA) e está na etiqueta do pluviômetro." });
+        if (q.acao === "manual") {
+            // lançamento feito à mão no NutriCafé: grava no servidor pra o app de irrigação enxergar
+            if (event.httpMethod !== "POST") return L.resp(405, { ok: false, erro: "Use POST." });
+            const data = String(q.data || "");
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || data > C.hojeBR(Date.now() + 86400000) || data < C.hojeBR(Date.now() - 400 * 86400000)) return L.resp(400, { ok: false, erro: "Data inválida." });
+            const apagar = q.mm === null || q.mm === "" || q.mm === undefined;
+            const mm = Math.round(C.numero(q.mm, NaN) * 10) / 10;
+            if (!apagar && (!isFinite(mm) || mm < 0 || mm > 1000)) return L.resp(400, { ok: false, erro: "mm inválido." });
+            await C.atualizar(codigo, (dados) => {
+                const m = C.lerManual(dados);
+                if (apagar) delete m[data]; else m[data] = mm;
+                return { manual: JSON.stringify(C.podarDias(m)) };
+            });
+            return L.resp(200, { ok: true });
+        }
         const d = await C.lerAparelho(codigo);
         if (!d) return L.resp(404, { ok: false, erro: "Pluviômetro não encontrado. Confira o código, ligue o aparelho, conecte ao Wi-Fi e espere uns 2 minutos." });
         const agora = Date.now();
@@ -31,7 +46,7 @@ exports.handler = async (event) => {
         const desde = C.hojeBR(agora - dias * 86400000);
         const cfg = C.configDe(d.dados);
         return L.resp(200, {
-            ok: true, hoje: C.hojeBR(agora), dias: C.lista(C.lerDias(d.dados), desde),
+            ok: true, hoje: C.hojeBR(agora), dias: C.lista(C.diasTodos(d.dados), desde),
             limite: cfg.limite, dias_considerados: cfg.dias,
             ultimo_contato: d.dados.ultimo ? new Date(Number(d.dados.ultimo)).toISOString() : "",
         });
