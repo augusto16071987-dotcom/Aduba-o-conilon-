@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-10-v158-sync-seguro";
+const APP_VERSION = "build-2026-11-10-v159-sync-texto";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -6234,17 +6234,7 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                 " ",
                 valido ? "Falar no WhatsApp" : "Preciso de ajuda no WhatsApp")),
             React.createElement(SecaoColapsavel, { titulo: "Sincroniza\u00E7\u00E3o na nuvem", aberta: secaoAberta === "sync", onToggle: () => alternarSecao("sync"), badge: React.createElement("span", { className: "text-[10px] font-semibold px-1.5 py-0.5 rounded-full " + (syncAtivo() ? "bg-[#e7ebdd] text-[#33422e]" : "bg-amber-50 text-amber-700") }, syncAtivo() ? "Ativa" : "N\u00E3o configurada") },
-                React.createElement("p", { className: "text-sm text-stone-600 mb-3" }, "Com isso ativo, tudo que voc\u00EA salva no app vai automaticamente pra nuvem tamb\u00E9m. Se trocar de celular, informe o mesmo ID abaixo pra recuperar os dados sozinho."),
-                React.createElement("label", { className: "block text-xs font-semibold tracking-wide text-stone-500 uppercase mb-1" }, "ID de sincroniza\u00E7\u00E3o"),
-                React.createElement("input", { className: inputCls + " mb-2", value: syncIdEditando, onChange: (e) => setSyncIdEditando(e.target.value) }),
-                React.createElement("button", {
-                    onClick: () => {
-                        setSyncId(syncIdEditando);
-                        setMensagemSync("Salvo! Reabrindo pra sincronizar com esse ID...");
-                        setTimeout(() => onDadosRestaurados(), 1000);
-                    },
-                    className: "w-full flex items-center justify-center gap-2 bg-[#33422e] text-white rounded-lg py-3 text-sm font-semibold active:bg-[#252f20]"
-                }, React.createElement(Icon, { name: "check", size: 16 }), " Usar este ID"),
+                React.createElement("p", { className: "text-sm text-stone-600 mb-3" }, "Com isso ativo, tudo que voc\u00EA salva no app vai automaticamente pra nuvem tamb\u00E9m. Se trocar de celular, \u00E9 s\u00F3 digitar o seu c\u00F3digo de ativa\u00E7\u00E3o no app novo que os dados voltam sozinhos."),
                 mensagemSync && React.createElement("p", { className: "text-xs text-[#4c6146] mt-2" }, mensagemSync),
                 React.createElement("div", { className: "mt-4 pt-4 border-t border-stone-200" },
                     React.createElement("label", { className: "block text-xs font-semibold tracking-wide text-stone-500 uppercase mb-1" }, "Sincronizar automaticamente"),
@@ -6259,15 +6249,14 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                             setSincronizando(false);
                             const u = getSyncUltima();
                             setSyncUltimaTxt(u ? new Date(u).toLocaleString("pt-BR") : "");
-                            if (!r.ok && r.erro) setMensagemSync("Ative a sincroniza\u00E7\u00E3o com um ID primeiro.");
+                            if (!r.ok && r.erro) setMensagemSync("N\u00E3o consegui sincronizar agora. Confira seu c\u00F3digo de ativa\u00E7\u00E3o e a internet.");
                             else if (!r.ok) setMensagemSync("N\u00E3o consegui falar com a nuvem agora (internet?). Tento de novo depois.");
                             else if (r.novos && r.novos.length) { setMensagemSync("Tem dados mais novos de outro aparelho. Atualizando..."); setTimeout(() => onDadosRestaurados(), 800); }
                             else setMensagemSync(r.enviados ? "Pronto! Enviei " + r.enviados + " altera\u00E7\u00E3o(\u00F5es) pendente(s) pra nuvem." : "Tudo certo \u2014 nuvem e celular j\u00E1 est\u00E3o iguais.");
                         },
                         className: "w-full flex items-center justify-center gap-2 border border-[#33422e] text-[#33422e] rounded-lg py-3 text-sm font-semibold active:bg-stone-100 disabled:opacity-50"
                     }, sincronizando ? "Sincronizando..." : "Sincronizar agora"),
-                    React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "Funciona enquanto o app est\u00E1 aberto (ou ao voltar pra ele e quando a internet volta). Tudo que voc\u00EA salva j\u00E1 vai pra nuvem na hora; isso aqui reenvia o que ficou pendente e avisa se outro aparelho salvou algo mais novo.")),
-                React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "Anote esse ID em algum lugar seguro (foto, papel) \u2014 \u00E9 ele que liga seus dados a este app em qualquer aparelho.")),
+                    React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "Funciona enquanto o app est\u00E1 aberto (ou ao voltar pra ele e quando a internet volta). Tudo que voc\u00EA salva j\u00E1 vai pra nuvem na hora; isso aqui reenvia o que ficou pendente e avisa se outro aparelho salvou algo mais novo."))),
             React.createElement(SecaoColapsavel, { titulo: "Backup dos dados", aberta: secaoAberta === "backup", onToggle: () => alternarSecao("backup") },
                 React.createElement("p", { className: "text-sm text-stone-600 mb-3" }, "Todos os dados do app (talh\u00F5es, an\u00E1lises, aduba\u00E7\u00F5es, pragas, compras, financeiro) ficam salvos s\u00F3 neste celular/navegador. Se desinstalar o app, trocar de celular ou limpar os dados do navegador, essas informa\u00E7\u00F5es se perdem \u2014 a menos que voc\u00EA tenha um backup salvo."),
                 React.createElement("button", { onClick: baixarBackup, className: "w-full flex items-center justify-center gap-2 bg-[#33422e] text-white rounded-lg py-3 text-sm font-semibold active:bg-[#252f20]" },
