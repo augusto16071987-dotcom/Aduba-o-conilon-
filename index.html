@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-08-v152-chuva-irrigacao";
+const APP_VERSION = "build-2026-11-10-v153-chuva-dias";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -4610,7 +4610,7 @@ async function buscarChuvaPlanilha(fonte) {
         if (!j || !j.ok || !Array.isArray(j.dias)) { const er = new Error((j && j.erro) || "resposta"); er.doServidor = !!(j && j.erro); throw er; }
         const mapa = {};
         j.dias.forEach((d) => { if (d && d.data) mapa[d.data] = Number(d.mm) || 0; });
-        const dados = { dias: mapa, limite: Number(j.limite) || LIMITE_CHUVA_PADRAO, diasConsiderados: Number(j.dias_considerados) === 2 ? 2 : 1, ultimo: j.ultimo_contato || "", atualizadoEm: Date.now() };
+        const dados = { dias: mapa, limite: Number(j.limite) || LIMITE_CHUVA_PADRAO, diasConsiderados: Math.min(7, Math.max(1, Math.round(Number(j.dias_considerados)) || 1)), ultimo: j.ultimo_contato || "", atualizadoEm: Date.now() };
         try { localStorage.setItem(CHUVA_CACHE_KEY, JSON.stringify(dados)); } catch (e) { }
         return dados;
     }
@@ -4671,9 +4671,10 @@ function ChuvaConfigModal({ urlAtual, onClose, onSave }) {
             " Conectar"),
         urlAtual && React.createElement("button", { type: "button", onClick: () => onSave(""), className: "w-full text-center text-xs text-red-600 font-semibold mt-3 underline" }, "Desconectar pluviômetro")));
 }
+const rotuloDiasChuva = (n) => n <= 1 ? "Só hoje" : (n === 2 ? "Hoje + ontem" : "Últimos " + n + " dias");
 function ChuvaLimiteModal({ codigo, limiteAtual, diasAtual, onClose, onSalvo }) {
     const [limite, setLimite] = useState(String(limiteAtual));
-    const [dias, setDias] = useState(diasAtual === 2 ? 2 : 1);
+    const [dias, setDias] = useState(Math.min(7, Math.max(1, Number(diasAtual) || 1)));
     const [erro, setErro] = useState("");
     const [salvando, setSalvando] = useState(false);
     const n = Number(String(limite).replace(",", "."));
@@ -4683,7 +4684,8 @@ function ChuvaLimiteModal({ codigo, limiteAtual, diasAtual, onClose, onSalvo }) 
         React.createElement(Field, { label: "Limite (mm)" },
             React.createElement(NumInput, { placeholder: "Ex: 12", step: "0.5", min: "1", value: limite, onChange: (e) => { setLimite(e.target.value); setErro(""); } })),
         React.createElement(Field, { label: "Quantos dias de chuva contar" },
-            React.createElement("div", { className: "grid grid-cols-2 gap-2" }, [[1, "Só hoje"], [2, "Hoje + ontem"]].map(([v, rot]) => (React.createElement("button", { key: v, type: "button", onClick: () => setDias(v), className: `py-2.5 rounded-lg text-sm font-semibold border ${dias === v ? "bg-[#33422e] text-white border-[#33422e]" : "bg-white text-stone-600 border-stone-300"}` }, rot))))),
+            React.createElement("select", { className: inputCls, value: dias, onChange: (e) => setDias(Number(e.target.value)) }, [1, 2, 3, 4, 5, 6, 7].map((v) => React.createElement("option", { key: v, value: v }, rotuloDiasChuva(v)))),
+            React.createElement("p", { className: "text-[10px] text-stone-400 mt-1" }, "Soma a chuva dos dias escolhidos. Se chegar ao limite, o app avisa e o agendamento automático da irrigação pula a rega. Quanto mais dias, mais tempo a irrigação fica suspensa depois de uma chuva forte.")),
         erro && React.createElement("p", { className: "text-xs text-red-600 mb-2" }, erro),
         React.createElement(PrimaryBtn, { disabled: !valido || salvando, onClick: async () => { setSalvando(true); try { await salvarLimiteChuva(codigo, Math.round(n * 10) / 10, dias); onSalvo(); } catch (e) { setErro(String(e.message || e)); setSalvando(false); } } },
             React.createElement(Icon, { name: "check", size: 18 }),
@@ -4878,7 +4880,7 @@ function CartaoChuva() {
                         React.createElement("button", { type: "button", onClick: () => setShowChuvaConfig(true), className: "font-semibold text-[#33628a] underline" }, "Configurar")))
                     : React.createElement("button", { type: "button", onClick: () => setShowChuvaConfig(true), className: "text-[11px] font-semibold text-[#33628a] underline" }, "Conectar pluviômetro"),
                 chuvaMsg && React.createElement("p", { className: "text-[11px] text-amber-700" }, chuvaMsg),
-                React.createElement("p", { className: "text-[10px] text-stone-400" }, "Limite pra pular a irrigação: " + fmtMm(limiteChuva) + " mm" + (chuvaPlan && chuvaPlan.diasConsiderados === 2 ? " (hoje + ontem)" : "") + (ehCodigoChuva(chuvaUrl) ? " · " : (chuvaUrl ? " (mude na planilha, aba Config)." : ".")),
+                React.createElement("p", { className: "text-[10px] text-stone-400" }, "Limite pra pular a irrigação: " + fmtMm(limiteChuva) + " mm" + (chuvaPlan && chuvaPlan.diasConsiderados > 1 ? " (" + rotuloDiasChuva(chuvaPlan.diasConsiderados).toLowerCase() + ")" : "") + (ehCodigoChuva(chuvaUrl) ? " · " : (chuvaUrl ? " (mude na planilha, aba Config)." : ".")),
                     ehCodigoChuva(chuvaUrl) && React.createElement("button", { type: "button", onClick: () => setShowChuvaLimite(true), className: "font-semibold text-[#33628a] underline" }, "Alterar"))),
         showChuvaForm && (React.createElement(ChuvaForm, { dataInicial: diaSelecionado, inicial: editandoChuva, onClose: () => { setShowChuvaForm(false); setEditandoChuva(null); }, onSave: (c) => {
                 // um lançamento manual por dia: se já existir um nesse dia, ele é trocado
