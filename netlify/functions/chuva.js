@@ -36,7 +36,7 @@ exports.handler = async (event) => {
         if (q.acao === "config") {
             if (event.httpMethod !== "POST") return L.resp(405, { ok: false, erro: "Use POST." });
             const limite = C.numero(q.limite, NaN);
-            const dias = Number(q.dias_considerados) === 2 ? 2 : 1;
+            const dias = Math.min(7, Math.max(1, Math.round(Number(q.dias_considerados)) || 1));
             if (!isFinite(limite) || limite <= 0 || limite > 200) return L.resp(400, { ok: false, erro: "Limite entre 1 e 200 mm." });
             await C.atualizar(codigo, () => ({ limite: String(Math.round(limite * 10) / 10), diasConsiderados: dias }));
             return L.resp(200, { ok: true, limite: Math.round(limite * 10) / 10, dias_considerados: dias });
