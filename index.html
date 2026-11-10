@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-10-v156-espaco-suporte";
+const APP_VERSION = "build-2026-11-10-v157-privacidade-exclusao";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -1011,7 +1011,8 @@ function TelaAssinatura({ onAtivado }) {
             React.createElement("h1", { className: "text-lg font-bold text-stone-800 text-center" }, "NutriCafé"),
             filhos,
             semSuporte ? null : React.createElement("a", { href: linkWhatsApp("Olá! Preciso de ajuda com o acesso ao NutriCafé."), target: "_blank", rel: "noopener noreferrer", className: "w-full mt-4 flex items-center justify-center gap-2 border border-[#25D366] text-[#128C4A] rounded-lg py-3 font-semibold" },
-                React.createElement(Icon, { name: "whatsapp", size: 17 }), " Falar no WhatsApp")));
+                React.createElement(Icon, { name: "whatsapp", size: 17 }), " Falar no WhatsApp"),
+            React.createElement("p", { className: "text-center text-[11px] text-stone-400 mt-3" }, React.createElement("a", { href: "/privacidade.html", target: "_blank", rel: "noopener", className: "underline" }, "Privacidade"), " \u00B7 ", React.createElement("a", { href: "/termos.html", target: "_blank", rel: "noopener", className: "underline" }, "Termos de uso"))));
     const msgErro = erro && React.createElement("p", { key: "er", className: "text-xs text-[#a8442f] mb-2" }, erro);
     const msgAviso = aviso && React.createElement("p", { key: "av", className: "text-xs text-[#33422e] bg-[#e7ebdd] rounded-lg p-2 mb-2" }, aviso);
     const btn = "w-full mt-2 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40";
@@ -6094,6 +6095,41 @@ function SecaoColapsavel({ titulo, badge, aberta, onToggle, children }) {
                 React.createElement(Icon, { name: "chevronLeft", size: 15, className: "text-stone-400" }))),
         aberta && React.createElement("div", { className: "px-4 pb-4 pt-1 border-t border-stone-100" }, children)));
 }
+function ExcluirContaCartao() {
+    const [aberto, setAberto] = useState(false);
+    const [conf, setConf] = useState("");
+    const [ocupado, setOcupado] = useState(false);
+    const [erro, setErro] = useState("");
+    const a = lerAtivacao();
+    const excluir = async () => {
+        if (!a || !a.codigo) { setErro("Nenhum c\u00F3digo ativo neste aparelho."); return; }
+        setOcupado(true); setErro("");
+        try {
+            const r = await fetch("/.netlify/functions/excluir-conta", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codigo: a.codigo, confirmar: "EXCLUIR" }) });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok || !j.ok) { setErro(j.erro || "N\u00E3o consegui excluir agora. Tente de novo."); setOcupado(false); return; }
+            try { Object.keys(localStorage).filter((k) => k.indexOf(STORAGE_PREFIX) === 0).forEach((k) => localStorage.removeItem(k)); } catch (e) { }
+            try { indexedDB.deleteDatabase("nutricafe_bulas"); } catch (e) { }
+            setTimeout(() => location.reload(), 400);
+        }
+        catch (e) { setErro("Sem conex\u00E3o. Tente de novo."); setOcupado(false); }
+    };
+    return React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-4" },
+        React.createElement("p", { className: "text-sm font-semibold text-stone-800" }, "Privacidade e dados"),
+        React.createElement("div", { className: "flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm" },
+            React.createElement("a", { href: "/privacidade.html", target: "_blank", rel: "noopener", className: "text-[#33422e] underline" }, "Pol\u00EDtica de privacidade"),
+            React.createElement("a", { href: "/termos.html", target: "_blank", rel: "noopener", className: "text-[#33422e] underline" }, "Termos de uso")),
+        !aberto
+            ? React.createElement("button", { onClick: () => setAberto(true), className: "mt-3 text-sm font-semibold text-[#a8442f]" }, "Excluir minha conta e dados")
+            : React.createElement("div", { className: "mt-3 border border-[#e0b3a8] bg-[#fbeeea] rounded-xl p-3" },
+                React.createElement("p", { className: "text-xs text-stone-700 mb-2" }, "Isso apaga seu cadastro, os dados na nuvem (fotos e bulas inclu\u00EDdas), suas mensagens da Comunidade e os dados deste aparelho. N\u00E3o d\u00E1 para desfazer e o c\u00F3digo deixa de funcionar. Fa\u00E7a um backup antes, se quiser."),
+                React.createElement("p", { className: "text-xs font-semibold text-stone-700 mb-1" }, "Digite EXCLUIR para confirmar:"),
+                React.createElement("input", { value: conf, onChange: (e) => setConf(e.target.value), autoCapitalize: "characters", className: "w-full border border-stone-300 rounded-lg px-3 py-2 text-sm bg-white" }),
+                erro && React.createElement("p", { className: "text-xs text-[#a8442f] mt-2" }, erro),
+                React.createElement("div", { className: "flex gap-2 mt-3" },
+                    React.createElement("button", { onClick: () => { setAberto(false); setConf(""); setErro(""); }, className: "flex-1 py-2 rounded-lg border border-stone-300 text-sm text-stone-700" }, "Cancelar"),
+                    React.createElement("button", { onClick: excluir, disabled: ocupado || conf.trim().toUpperCase() !== "EXCLUIR", className: "flex-1 py-2 rounded-lg bg-[#a8442f] text-white text-sm font-semibold disabled:opacity-40" }, ocupado ? "Excluindo..." : "Excluir tudo"))));
+}
 function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, onAddTabelaCustomizada, onUpdateTabelaCustomizada, onDeleteTabelaCustomizada }) {
     const ativacao = lerAtivacao();
     const valido = ativacaoValida();
@@ -6282,6 +6318,7 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                 React.createElement("div", { className: "min-w-0" },
                     React.createElement("p", { className: "text-sm font-semibold text-stone-800" }, "Suporte e sugest\u00E3o de melhorias"),
                     React.createElement("p", { className: "text-xs text-stone-400 truncate" }, "nutricafeoficial@gmail.com"))),
+            React.createElement(ExcluirContaCartao, null),
             React.createElement("p", { className: "text-center text-stone-400 text-[11px] font-medium pt-4" }, "40.967.587 MARCO ANTONIO AUGUSTO \u2014 CNPJ 40.967.587/0001-27"),
             React.createElement("p", { className: "text-center text-stone-300 text-[10px] pt-1" }, APP_VERSION_DISPLAY)),
         showTabelaForm && React.createElement(TabelaCustomizadaForm, { onClose: () => setShowTabelaForm(false), onSave: (t) => { onAddTabelaCustomizada(t); setShowTabelaForm(false); } }),
