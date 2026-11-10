@@ -28,7 +28,7 @@ function numero(v, padrao) { const n = Number(String(v).replace(",", ".")); retu
 function configDe(dados) {
     let limite = numero(dados.limite, LIMITE_PADRAO);
     if (!(limite > 0)) limite = LIMITE_PADRAO;
-    const dias = Number(dados.diasConsiderados) === 2 ? 2 : 1;
+    const dias = Math.min(7, Math.max(1, Math.round(Number(dados.diasConsiderados)) || 1));
     return { limite, dias };
 }
 function podarDias(mapa) {
@@ -67,7 +67,8 @@ function statusIrrigacao(dados, agora) {
     const ontem = hojeBR((agora || Date.now()) - 86400000);
     const mmHoje = mapa[hoje] || 0;
     const mmOntem = mapa[ontem] || 0;
-    const considerado = cfg.dias === 2 ? mmHoje + mmOntem : mmHoje;
+    let considerado = 0;
+    for (let i = 0; i < cfg.dias; i++) considerado += mapa[hojeBR((agora || Date.now()) - i * 86400000)] || 0;
     return {
         ok: true, pode_irrigar: considerado < cfg.limite,
         mm_hoje: mmHoje, mm_ontem: mmOntem, mm_considerado: Math.round(considerado * 10) / 10,
