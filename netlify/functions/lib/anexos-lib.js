@@ -164,4 +164,4 @@ async function rotinaDiaria() {
     return { limpeza: limpeza && limpeza.info, medicao: m.feito ? "completa" : "em andamento" };
 }
 
-module.exports = { lerConfig, salvarConfig, DIAS_VALIDOS, medirPasso, limparAnexos, resumo, rotinaDiaria, LIMITE_GRATIS_MB };
+module.exports = { api, BASE, RAIZ, lerConfig, salvarConfig, DIAS_VALIDOS, medirPasso, limparAnexos, resumo, rotinaDiaria, LIMITE_GRATIS_MB };
