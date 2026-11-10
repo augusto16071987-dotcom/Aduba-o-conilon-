@@ -3,6 +3,7 @@
 //  - 7 dias antes de vencer, 1 dia antes, e depois que venceu (até 3 dias).
 // Cada lembrete é enviado uma vez por vencimento (some sozinho quando o cliente renova).
 const L = require("./lib/firestore");
+const A = require("./lib/anexos-lib");
 const MAX_POR_EXECUCAO = 15;
 
 exports.handler = async (event) => {
@@ -38,7 +39,10 @@ exports.handler = async (event) => {
             await L.gravar([{ id: f.x.id, dados: marca, updateTime: f.x.updateTime }]).catch(() => {});
             enviados++;
         }
-        return L.resp(200, { ok: true, enviados, falhas, pendentes: Math.max(0, fila.length - MAX_POR_EXECUCAO) });
+        // rotina diária de espaço (limpa anexos velhos e mede o uso); nunca atrapalha os lembretes
+        let espaco = null;
+        try { espaco = await A.rotinaDiaria(); } catch (e) { console.error("rotina espaco:", e); }
+        return L.resp(200, { ok: true, enviados, falhas, pendentes: Math.max(0, fila.length - MAX_POR_EXECUCAO), espaco });
     } catch (e) {
         console.error("lembretes:", e);
         return L.resp(500, { erro: "Erro no servidor." });
