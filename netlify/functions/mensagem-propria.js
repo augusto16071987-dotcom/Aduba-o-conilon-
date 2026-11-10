@@ -58,6 +58,14 @@ exports.handler = async (event) => {
         if (b.acao === "apagar") {
             const d = await fetch(url, { method: "DELETE", headers: { Authorization: "Bearer " + tk } });
             if (!d.ok) throw new Error("DELETE " + d.status);
+            // arquivo grande: apaga também os pedaços
+            const aid = doc.fields.arquivoId && doc.fields.arquivoId.stringValue;
+            const np = Number(doc.fields.arquivoPartes && doc.fields.arquivoPartes.stringValue) || 0;
+            if (aid && /^[A-Za-z0-9]+$/.test(aid)) {
+                for (let i = 0; i < Math.min(np, 20); i++) {
+                    await fetch(BASE + "/" + COLECAO_CHAT + "/arq_" + aid + "_" + i, { method: "DELETE", headers: { Authorization: "Bearer " + tk } }).catch(() => {});
+                }
+            }
             return L.resp(200, { ok: true });
         }
         const texto = String(b.texto == null ? "" : b.texto).trim().slice(0, 2000);
