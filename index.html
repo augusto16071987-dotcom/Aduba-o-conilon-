@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-10-v157-privacidade-exclusao";
+const APP_VERSION = "build-2026-11-10-v158-sync-seguro";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -1200,10 +1200,18 @@ function syncAtivo() {
     return FIREBASE_PROJECT_ID && FIREBASE_PROJECT_ID.indexOf("COLOQUE_AQUI") === -1;
 }
 
-function firestoreDocUrl(chave, syncIdForcado) {
-    const syncId = syncIdForcado || getSyncId();
-    const docId = (syncId + "--" + chave).replace(/[^a-zA-Z0-9_-]/g, "_");
-    return `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/${FIRESTORE_COLECAO}/${docId}`;
+// Sincronização protegida: tudo passa pelo servidor (função "sync"), que confere o código de ativação.
+// Devolve { ok:true, ... } ou { ok:false, status, erro }.
+async function chamarSync(acao, chave, extras) {
+    try {
+        const a = lerAtivacao();
+        const corpo = Object.assign({ acao, chave }, extras || {});
+        if (!corpo.senha) { if (!a || !a.codigo) return { ok: false, status: 0, erro: "sem c\u00F3digo" }; corpo.codigo = a.codigo; }
+        const res = await fetch("/.netlify/functions/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo), cache: "no-store" });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || !j.ok) return { ok: false, status: res.status, erro: j.erro || "falha" };
+        return j;
+    } catch (e) { return { ok: false, status: 0, erro: "sem conex\u00E3o" }; }
 }
 
 /* ------------------------------ COMUNIDADE (chat) ----------------------------- */
@@ -1488,11 +1496,7 @@ async function bulaEnviarNuvem(id, dataUrl) {
     try {
         for (let i = 0; i < partes; i++) {
             const pedaco = dataUrl.slice(i * BULA_PEDACO, (i + 1) * BULA_PEDACO);
-            const res = await fetch(firestoreDocUrl("bula_" + id + "_" + i) + "?updateMask.fieldPaths=itens&updateMask.fieldPaths=atualizadoEm", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ fields: { itens: { stringValue: JSON.stringify(pedaco) }, atualizadoEm: { stringValue: new Date().toISOString() } } }),
-            });
+            const res = await chamarSync("gravar", "bula_" + id + "_" + i, { itens: JSON.stringify(pedaco), em: new Date().toISOString() });
             if (!res.ok) return 0;
         }
         return partes;
@@ -1569,13 +1573,10 @@ function bulaAbrir(dataUrl, nome) {
 async function carregarDaNuvemComData(chave) {
     if (!syncAtivo()) return null;
     try {
-        const res = await fetch(firestoreDocUrl(chave));
-        if (!res.ok) return null; // 404 = ainda não existe na nuvem, tudo bem
-        const json = await res.json();
-        const texto = json && json.fields && json.fields.itens && json.fields.itens.stringValue;
-        if (!texto) return null;
-        const em = (json.fields.atualizadoEm && json.fields.atualizadoEm.stringValue) || "";
-        return { dados: JSON.parse(texto), em };
+        const j = await chamarSync("ler", chave);
+        if (!j.ok || !j.existe) return null; // ainda não existe na nuvem, tudo bem
+        if (!j.itens) return null;
+        return { dados: JSON.parse(j.itens), em: j.em || "" };
     } catch (e) {
         console.error("Erro ao ler da nuvem", chave, e);
         return null;
@@ -1588,16 +1589,7 @@ async function carregarDaNuvem(chave) {
 async function salvarNaNuvem(chave, dados, em) {
     if (!syncAtivo()) return false;
     try {
-        const res = await fetch(firestoreDocUrl(chave) + "?updateMask.fieldPaths=itens&updateMask.fieldPaths=atualizadoEm", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                fields: {
-                    itens: { stringValue: JSON.stringify(dados) },
-                    atualizadoEm: { stringValue: em || new Date().toISOString() },
-                },
-            }),
-        });
+        const res = await chamarSync("gravar", chave, { itens: JSON.stringify(dados), em: em || new Date().toISOString() });
         return !!res.ok;
     } catch (e) {
         console.error("Erro ao sincronizar na nuvem", chave, e);
@@ -1609,11 +1601,9 @@ async function salvarNaNuvem(chave, dados, em) {
 async function nuvemQuandoMudou(chave) {
     if (!syncAtivo()) return null;
     try {
-        const res = await fetch(firestoreDocUrl(chave) + "?mask.fieldPaths=atualizadoEm");
-        if (res.status === 404) return { em: "" };
-        if (!res.ok) return null;
-        const json = await res.json();
-        return { em: (json && json.fields && json.fields.atualizadoEm && json.fields.atualizadoEm.stringValue) || "" };
+        const j = await chamarSync("quando", chave);
+        if (!j.ok) return null;
+        return { em: j.em || "" };
     } catch (e) { return null; }
 }
 
@@ -1622,13 +1612,9 @@ async function nuvemQuandoMudou(chave) {
 async function carregarDaNuvemDe(syncId, chave) {
     if (!syncAtivo()) return null;
     try {
-        const res = await fetch(firestoreDocUrl(chave, syncId));
-        if (!res.ok) return null;
-        const json = await res.json();
-        const texto = json && json.fields && json.fields.itens && json.fields.itens.stringValue;
-        const atualizadoEm = json && json.fields && json.fields.atualizadoEm && json.fields.atualizadoEm.stringValue;
-        if (!texto) return null;
-        return { dados: JSON.parse(texto), atualizadoEm };
+        const j = await chamarSync("ler", chave, { senha: SUPORTE_SENHA, syncId });
+        if (!j.ok || !j.existe || !j.itens) return null;
+        return { dados: JSON.parse(j.itens), atualizadoEm: j.em };
     } catch (e) {
         return null;
     }
