@@ -6,6 +6,16 @@ const L = require("./lib/firestore");
 const A = require("./lib/anexos-lib");
 const MAX_POR_EXECUCAO = 15;
 
+// Junta todos os documentos de cadastro, e-mails, pedidos, pagamentos e pluviômetro e manda pro Drive.
+async function fazerBackup() {
+    const docs = await L.listarTodos("");
+    const lista = docs.filter(x => x.id !== "config_anexos").map(x => ({ id: x.id, dados: x.dados }));
+    if (!lista.length) return { ok: false, motivo: "nada para copiar" };
+    const hoje = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10); // data no horário de Brasília
+    const r = await L.avisarPlanilha({ acao: "backup", data: hoje, total: lista.length, conteudo: JSON.stringify({ geradoEm: new Date().toISOString(), docs: lista }) });
+    return { ok: !!r.ok, total: lista.length, motivo: r.motivo || "" };
+}
+
 exports.handler = async (event) => {
     if (event.httpMethod === "GET") return L.resp(200, { ok: true, servico: "lembretes" });
     if (event.httpMethod !== "POST") return L.resp(405, { erro: "Use POST." });
@@ -42,7 +52,10 @@ exports.handler = async (event) => {
         // rotina diária de espaço (limpa anexos velhos e mede o uso); nunca atrapalha os lembretes
         let espaco = null;
         try { espaco = await A.rotinaDiaria(); } catch (e) { console.error("rotina espaco:", e); }
-        return L.resp(200, { ok: true, enviados, falhas, pendentes: Math.max(0, fila.length - MAX_POR_EXECUCAO), espaco });
+        // backup diário dos cadastros/pagamentos para o Google Drive (via Apps Script); nunca atrapalha o resto
+        let backup = null;
+        try { backup = await fazerBackup(); } catch (e) { console.error("backup:", e); backup = { ok: false, motivo: String(e.message || e) }; }
+        return L.resp(200, { ok: true, enviados, falhas, pendentes: Math.max(0, fila.length - MAX_POR_EXECUCAO), espaco, backup });
     } catch (e) {
         console.error("lembretes:", e);
         return L.resp(500, { erro: "Erro no servidor." });
