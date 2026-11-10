@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Excluir conta e dados — NutriCafé</title>
+<style>
+  body{margin:0;background:#f2ece0;color:#2b2b2b;font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:720px;margin:0 auto;padding:24px 18px 48px}
+  h1{font-size:26px;color:#33422e;margin:8px 0 4px}
+  h2{font-size:18px;color:#33422e;margin:28px 0 6px}
+  p,li{margin:6px 0}
+  .data{color:#6b6b6b;font-size:14px}
+  a{color:#33422e}
+  .box{background:#fff;border:1px solid #e0d9c9;border-radius:12px;padding:14px 16px;margin-top:10px}
+  nav{font-size:14px;margin-bottom:6px}
+  input[type=text]{width:100%;box-sizing:border-box;padding:12px;border:1px solid #cfc7b4;border-radius:10px;font-size:16px;margin:6px 0 12px;background:#fff}
+  button{background:#a8442f;color:#fff;border:0;border-radius:10px;padding:13px 18px;font-size:16px;font-weight:600;width:100%}
+  button:disabled{opacity:.45}
+  .ok{background:#e7ebdd;border:1px solid #b9c7a8;border-radius:10px;padding:12px 14px}
+  .erro{background:#f8e5e0;border:1px solid #e0b3a8;border-radius:10px;padding:12px 14px;color:#7a2a18}
+</style>
+</head>
+<body>
+<main>
+<nav><a href="/">← Voltar ao NutriCafé</a> · <a href="/privacidade.html">Privacidade</a> · <a href="/termos.html">Termos de uso</a> · <a href="/excluir-conta.html">Excluir conta</a></nav>
+<h1>Excluir minha conta e dados</h1>
+<p class="data">NutriCafé</p>
+<p>Use esta página para apagar a sua conta do NutriCafé e os seus dados guardados na nuvem. Você só precisa do <strong>código de ativação</strong> que recebeu por e-mail.</p>
+<div class="box">
+<p><strong>O que será apagado</strong></p>
+<ul>
+  <li>Seu cadastro e o seu código de ativação (o acesso deixa de funcionar).</li>
+  <li>Os dados sincronizados na nuvem: talhões, adubações, compras, fotos, bulas e demais registros.</li>
+  <li>Suas mensagens e arquivos na Comunidade.</li>
+</ul>
+<p><strong>O que fica:</strong> apenas o registro mínimo de pagamentos, exigido por lei. Dados guardados só no seu celular continuam nele até você limpar o app (se excluir pelo próprio app, isso já é feito).</p>
+<p><strong>Não dá para desfazer.</strong> Se quiser, faça antes um backup em Configurações → Backup, dentro do app.</p>
+</div>
+<div id="form" style="margin-top:18px">
+  <label for="cod"><strong>Código de ativação</strong></label>
+  <input id="cod" type="text" placeholder="Ex.: K7QM-4TXA" autocomplete="off" autocapitalize="characters">
+  <label for="conf"><strong>Para confirmar, digite EXCLUIR</strong></label>
+  <input id="conf" type="text" placeholder="EXCLUIR" autocomplete="off" autocapitalize="characters">
+  <button id="btn" disabled>Excluir minha conta e meus dados</button>
+</div>
+<div id="msg" style="margin-top:14px"></div>
+<p style="margin-top:20px">Prefere pedir por e-mail? Escreva para <a href="mailto:nutricafeoficial@gmail.com">nutricafeoficial@gmail.com</a> com o assunto “Excluir meus dados – NutriCafé”.</p>
+<p class="data" style="margin-top:32px">40.967.587 MARCO ANTONIO AUGUSTO — CNPJ 40.967.587/0001-27</p>
+</main>
+<script>
+(function(){
+  var cod=document.getElementById('cod'),conf=document.getElementById('conf'),btn=document.getElementById('btn'),msg=document.getElementById('msg');
+  function ok(){ btn.disabled = cod.value.replace(/[^A-Za-z0-9]/g,'').length < 8 || conf.value.trim().toUpperCase() !== 'EXCLUIR'; }
+  cod.oninput=ok; conf.oninput=ok;
+  btn.onclick=function(){
+    btn.disabled=true; btn.textContent='Excluindo...'; msg.innerHTML='';
+    fetch('/.netlify/functions/excluir-conta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codigo:cod.value.trim(),confirmar:'EXCLUIR'})})
+    .then(function(r){return r.json().then(function(j){return {r:r,j:j};});})
+    .then(function(x){
+      if(x.r.ok){ document.getElementById('form').style.display='none'; msg.innerHTML='<div class="ok"><strong>Pronto.</strong> Sua conta e seus dados foram excluídos. O código de ativação não funciona mais.</div>'; }
+      else { msg.innerHTML='<div class="erro"></div>'; msg.firstChild.textContent=(x.j&&x.j.erro)||'Não consegui agora.'; btn.textContent='Excluir minha conta e meus dados'; ok(); }
+    }).catch(function(){ msg.innerHTML='<div class="erro">Sem conexão. Tente de novo.</div>'; btn.textContent='Excluir minha conta e meus dados'; ok(); });
+  };
+})();
+</script>
+</body>
+</html>
