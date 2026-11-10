@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-10-v153-chuva-dias";
+const APP_VERSION = "build-2026-11-10-v156-espaco-suporte";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -73,6 +73,8 @@ function Icon({ name, size = 18, className = "" }) {
             React.createElement("path", { d: "M7 20h10M12 20v-8" }),
             React.createElement("path", { d: "M12 12S8 12 6 8c3-1 6 0 6 4Z" }),
             React.createElement("path", { d: "M12 12S16 12 18 8c-3-1-6 0-6 4Z" }));
+        case "download": return React.createElement("svg", { ...common },
+            React.createElement("path", { d: "M12 4v11M7 11l5 5 5-5M5 20h14" }));
         case "trash": return React.createElement("svg", { ...common },
             React.createElement("path", { d: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" }));
         case "x": return React.createElement("svg", { ...common },
@@ -1131,12 +1133,25 @@ function syncMetaGet(key) {
 function syncMetaSet(key, meta) {
     try { localStorage.setItem(STORAGE_PREFIX + "sync_meta_" + key, JSON.stringify(meta)); } catch (e) { }
 }
+// Aviso na tela quando o aparelho não consegue gravar (espaço cheio) — antes falhava em silêncio.
+function avisarFalhaSalvar() {
+    try {
+        if (document.getElementById("nc-aviso-espaco")) return;
+        const d = document.createElement("div");
+        d.id = "nc-aviso-espaco";
+        d.style.cssText = "position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;background:#a8442f;color:#fff;padding:12px 14px;border-radius:14px;font:600 13px/1.4 system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3)";
+        d.textContent = "\u26A0\uFE0F O aparelho est\u00E1 sem espa\u00E7o e N\u00C3O conseguiu salvar essa altera\u00E7\u00E3o neste aparelho. Em Configura\u00E7\u00F5es, fa\u00E7a o backup agora e libere espa\u00E7o (apague fotos antigas). Toque aqui para fechar.";
+        d.onclick = () => d.remove();
+        document.body.appendChild(d);
+    } catch (e) { }
+}
 async function saveList(key, list) {
     try {
         localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(list));
     }
     catch (e) {
         console.error("Erro ao salvar", key, e);
+        avisarFalhaSalvar();
     }
     const em = new Date().toISOString();
     const antes = syncMetaGet(key) || {};
@@ -1147,7 +1162,7 @@ async function saveList(key, list) {
 }
 // Grava só no aparelho (usado quando o dado veio da nuvem) — não manda de volta.
 function saveListSoLocal(key, list, em) {
-    try { localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(list)); } catch (e) { console.error("Erro ao salvar", key, e); }
+    try { localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(list)); } catch (e) { console.error("Erro ao salvar", key, e); avisarFalhaSalvar(); }
     syncMetaSet(key, { local: em, nuvem: em });
 }
 
@@ -1228,6 +1243,8 @@ async function buscarMensagensComunidade(limite) {
                     fotoBase64: f.fotoBase64 ? f.fotoBase64.stringValue : null,
                     arquivoBase64: f.arquivoBase64 ? f.arquivoBase64.stringValue : null,
                     arquivoNome: f.arquivoNome ? f.arquivoNome.stringValue : null,
+                    arquivoId: f.arquivoId ? f.arquivoId.stringValue : null,
+                    arquivoPartes: f.arquivoPartes ? Number(f.arquivoPartes.stringValue) || 0 : 0,
                 };
             });
         return msgs.reverse(); // mais antigas primeiro, pra exibir de cima pra baixo
@@ -1262,7 +1279,7 @@ async function buscarUltimaComunidade() {
     catch (e) { return null; }
 }
 
-async function enviarMensagemComunidade({ texto, autorNome, tipo, fotoBase64, arquivoBase64, arquivoNome }) {
+async function enviarMensagemComunidade({ texto, autorNome, tipo, fotoBase64, arquivoBase64, arquivoNome, arquivoId, arquivoPartes }) {
     const fields = {
         autorNome: campoTexto(autorNome || "Anônimo"),
         criadoEm: campoTexto(new Date().toISOString()),
@@ -1272,6 +1289,7 @@ async function enviarMensagemComunidade({ texto, autorNome, tipo, fotoBase64, ar
     if (fotoBase64) fields.fotoBase64 = campoTexto(fotoBase64);
     if (arquivoBase64) fields.arquivoBase64 = campoTexto(arquivoBase64);
     if (arquivoNome) fields.arquivoNome = campoTexto(arquivoNome);
+    if (arquivoId) { fields.arquivoId = campoTexto(arquivoId); fields.arquivoPartes = campoTexto(String(arquivoPartes || 0)); }
     Object.keys(fields).forEach((k) => { if (!fields[k]) delete fields[k]; });
     const res = await fetch(comunidadeUrl(), {
         method: "POST",
@@ -1279,6 +1297,48 @@ async function enviarMensagemComunidade({ texto, autorNome, tipo, fotoBase64, ar
         body: JSON.stringify({ fields }),
     });
     if (!res.ok) throw new Error("Falha ao enviar mensagem");
+}
+
+// Arquivo grande: o Firestore só aceita ~1 MB por documento, então o arquivo sobe em pedaços
+// (um documento por pedaço, na mesma coleção da Comunidade; eles não aparecem na lista do chat).
+const ARQ_PEDACO = 700000;
+async function subirArquivoGrandeComunidade(dataUrl, aoProgredir) {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const partes = Math.ceil(dataUrl.length / ARQ_PEDACO);
+    for (let i = 0; i < partes; i++) {
+        const res = await fetch(comunidadeUrl("?documentId=arq_" + id + "_" + i), {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fields: { dados: { stringValue: dataUrl.slice(i * ARQ_PEDACO, (i + 1) * ARQ_PEDACO) } } }),
+        });
+        if (!res.ok) throw new Error("Falha ao enviar o arquivo");
+        if (aoProgredir) aoProgredir(i + 1, partes);
+    }
+    return { id, partes };
+}
+// Baixa qualquer foto/arquivo da Comunidade pro aparelho (qualquer pessoa pode)
+async function baixarAnexoComunidade(msg) {
+    let dataUrl = msg.arquivoBase64 || msg.fotoBase64;
+    if (!dataUrl && msg.arquivoId) {
+        dataUrl = "";
+        for (let i = 0; i < msg.arquivoPartes; i++) {
+            const r = await fetch(comunidadeUrl("/arq_" + msg.arquivoId + "_" + i));
+            if (!r.ok) throw new Error("Não consegui baixar agora.");
+            const j = await r.json();
+            dataUrl += (j.fields && j.fields.dados && j.fields.dados.stringValue) || "";
+        }
+    }
+    if (!dataUrl) throw new Error("Arquivo indisponível.");
+    const virgula = dataUrl.indexOf(",");
+    const tipoMime = (dataUrl.slice(5, virgula).split(";")[0]) || "application/octet-stream";
+    const bin = atob(dataUrl.slice(virgula + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: tipoMime }));
+    const a = document.createElement("a");
+    const nomePadrao = msg.arquivoNome || ("foto-nutricafe." + (tipoMime.split("/")[1] || "jpg").replace("jpeg", "jpg"));
+    a.href = url; a.download = nomePadrao;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 async function apagarMensagemComunidade(id) {
@@ -1302,7 +1362,7 @@ async function acaoMensagemPropria(id, acao, texto) {
 
 // Comprime uma imagem no navegador (reduzindo qualidade/tamanho) até caber
 // no limite de bytes, e devolve como data URI base64 pronta pra salvar.
-function comprimirImagem(file, maxBytes) {
+function comprimirImagem(file, maxBytes, maxLado) {
     return new Promise((resolve, reject) => {
         const leitor = new FileReader();
         leitor.onerror = () => reject(new Error("Não consegui ler o arquivo."));
@@ -1311,6 +1371,7 @@ function comprimirImagem(file, maxBytes) {
             img.onerror = () => reject(new Error("Arquivo de imagem inválido."));
             img.onload = () => {
                 let largura = img.width, altura = img.height;
+                if (maxLado && Math.max(largura, altura) > maxLado) { const f = maxLado / Math.max(largura, altura); largura = Math.round(largura * f); altura = Math.round(altura * f); }
                 const tentar = (qualidade, escala) => {
                     const w = Math.round(largura * escala), h = Math.round(altura * escala);
                     const canvas = document.createElement("canvas");
@@ -1338,6 +1399,20 @@ function comprimirImagem(file, maxBytes) {
     });
 }
 
+// Mesma compressão, a partir de uma foto que já está como data URI (usada na migração das fotos antigas)
+function comprimirDataUrl(dataUrl, maxBytes, maxLado) {
+    return new Promise((resolve, reject) => {
+        try {
+            const virgula = dataUrl.indexOf(",");
+            const bin = atob(dataUrl.slice(virgula + 1));
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            const mime = dataUrl.slice(5, virgula).split(";")[0] || "image/jpeg";
+            comprimirImagem(new Blob([bytes], { type: mime }), maxBytes, maxLado).then(resolve, reject);
+        } catch (e) { reject(e); }
+    });
+}
+
 // Pra arquivos que não são imagem (PDF etc) — só lê como base64 e checa o tamanho.
 function lerArquivoComoBase64(file, maxBytes) {
     return new Promise((resolve, reject) => {
@@ -1345,7 +1420,7 @@ function lerArquivoComoBase64(file, maxBytes) {
         leitor.onerror = () => reject(new Error("Não consegui ler o arquivo."));
         leitor.onload = () => {
             if (leitor.result.length > maxBytes) {
-                reject(new Error("Esse arquivo é grande demais (máximo ~500KB)."));
+                reject(new Error("Esse arquivo é grande demais (máximo ~5 MB)."));
                 return;
             }
             resolve(leitor.result);
@@ -1440,6 +1515,40 @@ async function bulaObter(compra) {
         if (dados) bulaSalvarLocal(compra.id, dados);
     }
     return dados;
+}
+/* FOTO DA COMPRA: sai da lista de compras (que fica leve) e vai pro mesmo espaço
+   grande das bulas (IndexedDB) + nuvem em pedaços. A compra guarda só temFoto/fotoPartes. */
+const FOTO_COMPRA_MAX = 220 * 1024, FOTO_COMPRA_LADO = 1280;
+const _fotoCache = {};
+async function fotoCompraObter(compra) {
+    if (!compra) return null;
+    if (compra.fotoBase64) return compra.fotoBase64;          // formato antigo, ainda não migrada
+    if (_fotoCache[compra.id]) return _fotoCache[compra.id];
+    let d = await bulaLerLocal("foto_" + compra.id);
+    if (!d && compra.fotoPartes > 0) {
+        d = await bulaBaixarNuvem("foto_" + compra.id, compra.fotoPartes);
+        if (d) bulaSalvarLocal("foto_" + compra.id, d);
+    }
+    if (d) _fotoCache[compra.id] = d;
+    return d || null;
+}
+// Guarda a foto. Devolve { ok (cabe no aparelho), partes (na nuvem) }
+async function fotoCompraSalvar(id, dataUrl) {
+    const ok = await bulaSalvarLocal("foto_" + id, dataUrl);
+    if (ok) _fotoCache[id] = dataUrl;
+    const partes = await bulaEnviarNuvem("foto_" + id, dataUrl);
+    return { ok, partes };
+}
+function fotoCompraRemover(id) { delete _fotoCache[id]; bulaRemoverLocal("foto_" + id); }
+function FotoCompra({ compra, className, vazio }) {
+    const [src, setSrc] = useState(compra && compra.fotoBase64 ? compra.fotoBase64 : (compra && _fotoCache[compra.id]) || null);
+    useEffect(() => {
+        let vivo = true;
+        if (compra && (compra.fotoBase64 || compra.temFoto)) fotoCompraObter(compra).then((d) => { if (vivo) setSrc(d); });
+        else setSrc(null);
+        return () => { vivo = false; };
+    }, [compra && compra.id, compra && compra.temFoto, compra && compra.fotoBase64 ? 1 : 0]);
+    return src ? React.createElement("img", { src, className }) : (vazio || null);
 }
 function bulaAbrir(dataUrl, nome) {
     const virgula = dataUrl.indexOf(",");
@@ -3103,11 +3212,16 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
     const [pesoSaco, setPesoSaco] = useState(initial && initial.pesoSaco != null ? String(initial.pesoSaco) : "50");
     const [obs, setObs] = useState(initial ? initial.obs || "" : "");
     const [fotoBase64, setFotoBase64] = useState(initial ? initial.fotoBase64 || null : null);
+    const [fotoMudou, setFotoMudou] = useState(false);
     const [enviandoFoto, setEnviandoFoto] = useState(false);
     const [erroFoto, setErroFoto] = useState("");
     const fotoInputRef = useRef(null);
     const galeriaInputRef = useRef(null);
     const [menuFoto, setMenuFoto] = useState(false);
+    // foto já guardada no espaço grande: carrega pra mostrar no formulário
+    useEffect(() => {
+        if (initial && !initial.fotoBase64 && initial.temFoto) fotoCompraObter(initial).then((d) => { if (d) setFotoBase64(d); });
+    }, []);
     const escolherFoto = async (e) => {
         const file = e.target.files && e.target.files[0];
         e.target.value = "";
@@ -3115,8 +3229,9 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
         setErroFoto("");
         setEnviandoFoto(true);
         try {
-            const dados = await comprimirImagem(file, 700 * 1024);
+            const dados = await comprimirImagem(file, FOTO_COMPRA_MAX, FOTO_COMPRA_LADO);
             setFotoBase64(dados);
+            setFotoMudou(true);
         } catch (err) {
             setErroFoto(err.message || "N\u00E3o consegui processar essa foto.");
         }
@@ -3289,7 +3404,7 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
             ) : (
                 React.createElement("div", { className: "relative inline-block" },
                     React.createElement("img", { src: fotoBase64, className: "h-28 w-28 object-cover rounded-lg border border-stone-200" }),
-                    React.createElement("button", { type: "button", onClick: () => setFotoBase64(null), className: "absolute -top-2 -right-2 bg-[#a8442f] text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow" }, "\u2715"))
+                    React.createElement("button", { type: "button", onClick: () => { setFotoBase64(null); setFotoMudou(true); }, className: "absolute -top-2 -right-2 bg-[#a8442f] text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow" }, "\u2715"))
             ),
             erroFoto && React.createElement("p", { className: "text-xs text-[#a8442f] mt-1" }, erroFoto),
             menuFoto && React.createElement("div", { className: "fixed inset-0 z-[100] flex items-end bg-black/40", onClick: () => setMenuFoto(false) },
@@ -3341,10 +3456,22 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
                         setSalvando(false);
                     }
                 }
+                // Foto: vai pro espaço grande (IndexedDB + nuvem); a compra guarda só a marca.
+                let fotoMeta = initial ? { temFoto: !!initial.temFoto || !!initial.fotoBase64, fotoPartes: initial.fotoPartes || 0 } : { temFoto: false, fotoPartes: 0 };
+                if (fotoMudou || (initial && initial.fotoBase64)) {
+                    if (!fotoBase64) { fotoCompraRemover(compraId); fotoMeta = { temFoto: false, fotoPartes: 0 }; }
+                    else {
+                        setSalvando(true);
+                        const r = await fotoCompraSalvar(compraId, fotoBase64);
+                        setSalvando(false);
+                        if (!r.ok && !r.partes) { setErroFoto("N\u00E3o consegui guardar a foto (aparelho sem espa\u00E7o). A compra n\u00E3o foi salva \u2014 libere espa\u00E7o ou remova a foto."); return; }
+                        fotoMeta = { temFoto: true, fotoPartes: r.partes };
+                    }
+                }
                 const compraObj = {
                     id: compraId, data, categoria, produto: produto.trim(), formulacao: formulacao.trim(),
                     quantidade: Number(quantidade), unidade, pesoSaco: (unidade === "sacos" || unidade === "galoes") ? Number(pesoSaco) : null, valorTotal: total, obs: obs.trim(),
-                    mostrarEstoque, fotoBase64: fotoBase64 || null,
+                    mostrarEstoque, fotoBase64: null, temFoto: fotoMeta.temFoto, fotoPartes: fotoMeta.fotoPartes,
                     bulaNome: bulaMeta.bulaNome || null, bulaPartes: bulaMeta.bulaPartes || 0, bulaTamanho: bulaMeta.bulaTamanho || 0,
                     ...nutrientesSalvos,
                 };
@@ -5346,8 +5473,8 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos,
                 ano,
                 ".")),
             comprasDoAnoFiltradas.map((c) => (React.createElement("div", { key: c.id, className: "bg-white border border-stone-200 rounded-2xl shadow-sm p-3 flex items-start gap-3" },
-                c.fotoBase64 ? (
-                    React.createElement("img", { src: c.fotoBase64, className: "w-9 h-9 rounded-full object-cover shrink-0" })
+                (c.fotoBase64 || c.temFoto) ? (
+                    React.createElement(FotoCompra, { compra: c, className: "w-9 h-9 rounded-full object-cover shrink-0", vazio: React.createElement("div", { className: "w-9 h-9 rounded-full bg-stone-200 shrink-0" }) })
                 ) : (
                     React.createElement("div", { className: "w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-white", style: { backgroundColor: corCategoria[c.categoria] || "#6b6b6b" } },
                         React.createElement(Icon, { name: "clipboard", size: 15 }))),
@@ -5902,7 +6029,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
         ] },
         { id: "comunidade", titulo: "\ud83d\udcac Comunidade", itens: [
             ["O que \u00E9", "Um espa\u00E7o s\u00F3 pra usuários conversarem entre si e trocarem experi\u00EAncias \u2014 toque no \u00EDcone de bal\u00E3o de conversa, no topo da tela inicial, ao lado de Ajuda e Configura\u00E7\u00F5es."],
-            ["Fotos e arquivos", "D\u00E1 pra mandar texto, fotos e arquivos (PDF, documentos) pra outros usuários verem. Eles s\u00E3o comprimidos automaticamente antes de enviar (at\u00E9 uns 700KB cada), pra n\u00E3o pesar no seu plano de dados nem demorar pra carregar \u2014 em troca, a qualidade da foto fica um pouco reduzida."],
+            ["Fotos e arquivos", "D\u00E1 pra mandar texto, fotos e arquivos (PDF, documentos) pra outros usu\u00E1rios. As fotos s\u00E3o comprimidas automaticamente antes de enviar (a qualidade fica um pouco reduzida, pra n\u00E3o pesar no plano de dados). Arquivos como PDF podem ter at\u00E9 uns 5 MB. Qualquer pessoa da Comunidade pode baixar: toque em \"Baixar foto\" embaixo da imagem ou no nome do arquivo."],
             ["Atualiza\u00E7\u00E3o autom\u00E1tica", "A conversa atualiza sozinha a cada poucos segundos, sem precisar puxar a tela pra atualizar."],
             ["Modera\u00E7\u00E3o", "\u00C9 um espa\u00E7o aberto entre usuários \u2014 evite compartilhar dados sens\u00EDveis (senha, dados de pagamento) por l\u00E1. Mensagens impr\u00F3prias podem ser removidas."],
         ] },
@@ -6926,6 +7053,65 @@ function TelaLiberarAssinatura({ onBack }) {
             corpo));
 }
 
+async function chamarAnexos(corpo) {
+    const res = await fetch("/.netlify/functions/anexos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ senha: SUPORTE_SENHA }, corpo)) });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.erro || "Não consegui agora.");
+    return j;
+}
+const fmtTamanhoBytes = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2).replace(".", ",") + " GB" : (b >= 1048576 ? (b / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(b / 1024)) + " KB");
+function PainelEspaco({ onBack, resumoInicial, onResumo }) {
+    const [r, setR] = useState(resumoInicial || null);
+    const [msg, setMsg] = useState("");
+    const [erro, setErro] = useState("");
+    const [ocupado, setOcupado] = useState("");
+    const [limite, setLimite] = useState(resumoInicial ? String(resumoInicial.limiteMb) : "1024");
+    const atualizar = (novo) => { setR(novo); if (onResumo) onResumo(novo); };
+    useEffect(() => { chamarAnexos({ acao: "status" }).then((j) => { atualizar(j.resumo); setLimite(String(j.resumo.limiteMb)); }).catch((e) => setErro(String(e.message))); }, []);
+    const rodar = async (nome, fn) => { setOcupado(nome); setErro(""); setMsg(""); try { await fn(); } catch (e) { setErro(String(e.message || e)); } setOcupado(""); };
+    const mudarDias = (v) => rodar("dias", async () => { const j = await chamarAnexos({ acao: "config", dias: Number(v) }); atualizar(j.resumo); setMsg("Prazo salvo."); });
+    const salvarLimite = () => rodar("limite", async () => { const j = await chamarAnexos({ acao: "config", limiteMb: Number(String(limite).replace(",", ".")) }); atualizar(j.resumo); setMsg("Limite salvo."); });
+    const medir = () => rodar("medir", async () => {
+        let j = await chamarAnexos({ acao: "medir", reiniciar: true });
+        let voltas = 0;
+        while (!j.feito && voltas < 80) { setMsg("Medindo... " + fmtTamanhoBytes(j.parcialBytes) + " até agora"); j = await chamarAnexos({ acao: "medir" }); voltas++; }
+        atualizar(j.resumo); setMsg(j.feito ? "Medição concluída." : "Ainda medindo — toque de novo para continuar.");
+    });
+    const limpar = () => { if (!confirm("Apagar agora os anexos da Comunidade mais velhos que o prazo escolhido? As mensagens ficam, só o anexo some. Isso não pode ser desfeito.")) return; rodar("limpar", async () => { const j = await chamarAnexos({ acao: "limpar" }); atualizar(j.resumo); setMsg("Limpeza feita: " + j.limpeza.info + ". Meça de novo para ver o novo total."); }); };
+    const pct = r ? Math.min(100, r.pct) : 0;
+    const cor = r && r.alerta ? "#a8442f" : "#4c6146";
+    return React.createElement("div", { className: "min-h-screen bg-[#f2ece0]" },
+        React.createElement("div", { className: "bg-[#33422e] px-4 pt-5 pb-3 flex items-center gap-3 sticky top-0 z-10" },
+            React.createElement("button", { onClick: onBack, className: "text-[#cdd7c4]" }, React.createElement(Icon, { name: "chevronLeft", size: 22 })),
+            React.createElement("h1", { className: "text-white font-bold text-base" }, "\ud83d\udcbe Espa\u00e7o e limpeza")),
+        React.createElement("div", { className: "px-4 py-4 space-y-4 max-w-md mx-auto" },
+            erro && React.createElement("p", { className: "text-sm text-[#a8442f]" }, erro),
+            msg && React.createElement("p", { className: "text-sm text-[#4c6146]" }, msg),
+            React.createElement("div", { className: "bg-white rounded-2xl border border-stone-200 p-4" },
+                React.createElement("p", { className: "text-sm font-bold text-stone-800 mb-1" }, "Espa\u00e7o usado no Firebase (estimado)"),
+                !r ? React.createElement("p", { className: "text-sm text-stone-400" }, "Carregando...")
+                    : !r.medidoEm ? React.createElement("p", { className: "text-sm text-stone-500" }, "Ainda n\u00e3o medido. Toque em \"Medir agora\".")
+                    : React.createElement("div", null,
+                        React.createElement("p", { className: "text-2xl font-bold", style: { color: cor } }, fmtTamanhoBytes(r.bytesTotal), React.createElement("span", { className: "text-sm font-normal text-stone-500" }, " de " + fmtTamanhoBytes(r.limiteMb * 1048576) + " (" + String(r.pct).replace(".", ",") + "%)")),
+                        React.createElement("div", { className: "h-2.5 rounded-full bg-stone-200 mt-2 overflow-hidden" }, React.createElement("div", { style: { width: pct + "%", background: cor, height: "100%" } })),
+                        r.alerta && React.createElement("p", { className: "text-sm font-semibold text-[#a8442f] mt-2" }, "\u26a0\ufe0f Passou de " + r.avisoPct + "% do espa\u00e7o. Reduza o prazo de guarda ou limpe agora."),
+                        React.createElement("p", { className: "text-xs text-stone-500 mt-2" }, "Comunidade: " + fmtTamanhoBytes(r.bytesComunidade) + " \u00b7 Dados dos clientes (inclui fotos e bulas): " + fmtTamanhoBytes(r.bytesDados) + " \u00b7 Assinaturas: " + fmtTamanhoBytes(r.bytesAssin)),
+                        React.createElement("p", { className: "text-xs text-stone-400 mt-1" }, "Medido em " + new Date(r.medidoEm).toLocaleString("pt-BR") + ". O Firebase mostra o n\u00famero exato em Firestore \u2192 Uso.")),
+                React.createElement("button", { onClick: medir, disabled: !!ocupado, className: "w-full mt-3 bg-[#33422e] text-white font-semibold rounded-lg py-2.5 disabled:opacity-40" }, ocupado === "medir" ? "Medindo..." : "Medir agora")),
+            React.createElement("div", { className: "bg-white rounded-2xl border border-stone-200 p-4" },
+                React.createElement("p", { className: "text-sm font-bold text-stone-800 mb-1" }, "Quanto tempo guardar fotos e arquivos da Comunidade"),
+                React.createElement("p", { className: "text-xs text-stone-500 mb-2" }, "Passado o prazo, o anexo \u00e9 apagado todo dia automaticamente; o texto da mensagem fica, com o aviso \"anexo removido\"."),
+                React.createElement("select", { className: inputCls, value: r ? r.diasAnexos : 0, disabled: !r || !!ocupado, onChange: (e) => mudarDias(e.target.value) },
+                    [[0, "Guardar sempre"], [30, "30 dias"], [60, "60 dias"], [90, "90 dias"], [180, "6 meses"], [365, "1 ano"]].map(([v, t]) => React.createElement("option", { key: v, value: v }, t))),
+                r && r.ultimaLimpeza && React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "\u00daltima limpeza: " + new Date(r.ultimaLimpeza).toLocaleString("pt-BR") + " \u2014 " + r.ultimaLimpezaInfo),
+                React.createElement("button", { onClick: limpar, disabled: !r || !r.diasAnexos || !!ocupado, className: "w-full mt-3 border border-[#a8442f] text-[#a8442f] font-semibold rounded-lg py-2.5 disabled:opacity-30" }, ocupado === "limpar" ? "Limpando..." : "Limpar agora")),
+            React.createElement("div", { className: "bg-white rounded-2xl border border-stone-200 p-4" },
+                React.createElement("p", { className: "text-sm font-bold text-stone-800 mb-1" }, "Limite para o aviso (MB)"),
+                React.createElement("p", { className: "text-xs text-stone-500 mb-2" }, "O plano gr\u00e1tis do Firebase \u00e9 1024 MB (1 GB). O aviso aparece quando passar de 80% desse valor."),
+                React.createElement("div", { className: "flex gap-2" },
+                    React.createElement("input", { className: inputCls, inputMode: "numeric", value: limite, onChange: (e) => setLimite(e.target.value) }),
+                    React.createElement("button", { onClick: salvarLimite, disabled: !!ocupado, className: "px-4 rounded-lg bg-[#33422e] text-white font-semibold disabled:opacity-40" }, "Salvar")))));
+}
 function TelaSuporte() {
     const [syncId, setSyncId] = useState("");
     const [carregando, setCarregando] = useState(false);
@@ -6937,6 +7123,9 @@ function TelaSuporte() {
     const [showRelatorio, setShowRelatorio] = useState(false);
     const [showLiberar, setShowLiberar] = useState(false);
     const [showModerarChat, setShowModerarChat] = useState(false);
+    const [showEspaco, setShowEspaco] = useState(false);
+    const [resumoEspaco, setResumoEspaco] = useState(null);
+    useEffect(() => { if (SUPORTE_SENHA) chamarAnexos({ acao: "status" }).then((j) => setResumoEspaco(j.resumo)).catch(() => { }); }, []);
     const noop = () => {};
     const CHAVES = ["talhoes", "analises_por_talhao", "adubacoes_por_talhao", "defensivos_por_talhao", "despesas_por_talhao", "receitas_por_talhao", "compras", "agendamentos_por_talhao", "tabelas_customizadas"];
     const carregar = async () => {
@@ -6992,6 +7181,9 @@ function TelaSuporte() {
     if (showModerarChat) {
         return React.createElement(TelaComunidade, { onBack: () => setShowModerarChat(false), meuNome: "Suporte", souAdmin: true });
     }
+    if (showEspaco) {
+        return React.createElement(PainelEspaco, { onBack: () => setShowEspaco(false), resumoInicial: resumoEspaco, onResumo: setResumoEspaco });
+    }
 
     if (!dados) {
         return React.createElement("div", { className: "min-h-screen bg-[#f2ece0] flex items-center justify-center px-6" },
@@ -7002,7 +7194,9 @@ function TelaSuporte() {
                 erro ? React.createElement("p", { className: "text-xs text-[#a8442f] mt-2" }, erro) : null,
                 React.createElement("button", { onClick: carregar, disabled: !syncId.trim() || carregando, className: "w-full mt-4 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, carregando ? "Carregando..." : "Carregar dados"),
                 React.createElement("button", { onClick: () => setShowLiberar(true), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "\ud83d\udd13 Acessos e assinaturas"),
-                React.createElement("button", { onClick: () => setShowModerarChat(true), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "\ud83d\udcac Moderar comunidade (chat)")
+                React.createElement("button", { onClick: () => setShowModerarChat(true), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "\ud83d\udcac Moderar comunidade (chat)"),
+                React.createElement("button", { onClick: () => setShowEspaco(true), className: "w-full mt-3 border font-semibold rounded-lg py-3 " + (resumoEspaco && resumoEspaco.alerta ? "border-[#a8442f] text-[#a8442f] bg-red-50" : "border-[#33422e] text-[#33422e]") }, (resumoEspaco && resumoEspaco.alerta ? "\u26a0\ufe0f " : "\ud83d\udcbe ") + "Espa\u00e7o e limpeza" + (resumoEspaco && resumoEspaco.medidoEm ? " (" + String(resumoEspaco.pct).replace(".", ",") + "% usado)" : "")),
+                resumoEspaco && resumoEspaco.alerta && React.createElement("p", { className: "text-xs font-semibold text-[#a8442f] mt-2" }, "O espa\u00e7o do Firebase passou de " + resumoEspaco.avisoPct + "%. Toque acima para ver e limpar.")
             )
         );
     }
@@ -7120,13 +7314,21 @@ function TelaSuporte() {
 }
 /* ------------------------------ APP ----------------------------- */
 /* ------------------------------ TELA COMUNIDADE (chat) ----------------------------- */
-const TAMANHO_MAX_FOTO = 700 * 1024;
-const TAMANHO_MAX_ARQUIVO = 500 * 1024;
+const TAMANHO_MAX_FOTO = 850 * 1024;
+const TAMANHO_MAX_ARQUIVO = 7 * 1024 * 1024;   // ~5 MB de arquivo de verdade (base64 pesa 1/3 a mais)
+const TAMANHO_ARQUIVO_INLINE = 700 * 1024;
 
 function BolhaMensagem({ msg, souEu, onApagar, onEditar, onApagarPropria }) {
     const [editando, setEditando] = useState(false);
     const [novoTexto, setNovoTexto] = useState("");
     const [salvando, setSalvando] = useState(false);
+    const [baixando, setBaixando] = useState(false);
+    const [erroBaixar, setErroBaixar] = useState("");
+    const baixar = async () => {
+        setBaixando(true); setErroBaixar("");
+        try { await baixarAnexoComunidade(msg); } catch (e) { setErroBaixar(String(e.message || "Não consegui baixar agora.")); }
+        setBaixando(false);
+    };
     const hora = msg.criadoEm ? new Date(msg.criadoEm).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
     const salvar = async () => {
         const t = novoTexto.trim();
@@ -7149,9 +7351,12 @@ function BolhaMensagem({ msg, souEu, onApagar, onEditar, onApagarPropria }) {
                 React.createElement("button", { type: "button", onClick: () => setEditando(false), className: "px-3 py-1.5 rounded-full text-xs font-semibold text-stone-500" }, "Cancelar"),
                 React.createElement("button", { type: "button", onClick: salvar, disabled: salvando, className: "px-4 py-1.5 rounded-full text-xs font-semibold bg-[#33422e] text-white disabled:opacity-40" }, salvando ? "Salvando..." : "Salvar")))
             : (msg.texto ? React.createElement("p", { className: "text-sm text-stone-700 whitespace-pre-wrap break-words" }, msg.texto) : null),
-        msg.tipo === "foto" && msg.fotoBase64 ? React.createElement("img", { src: msg.fotoBase64, className: "mt-2 rounded-lg max-w-full max-h-64 object-cover" }) : null,
-        msg.tipo === "arquivo" && msg.arquivoBase64 ? React.createElement("a", { href: msg.arquivoBase64, download: msg.arquivoNome || "arquivo", className: "mt-2 flex items-center gap-2 bg-[#f2ece0] rounded-lg px-3 py-2 text-xs font-semibold text-[#33422e]" },
-            React.createElement(Icon, { name: "clipboard", size: 14 }), msg.arquivoNome || "Arquivo") : null);
+        msg.tipo === "foto" && msg.fotoBase64 ? React.createElement("div", { className: "mt-2" },
+            React.createElement("img", { src: msg.fotoBase64, className: "rounded-lg max-w-full max-h-64 object-cover" }),
+            React.createElement("button", { type: "button", onClick: baixar, disabled: baixando, className: "mt-1.5 inline-flex items-center gap-1.5 text-xs font-semibold text-[#33422e] bg-[#f2ece0] rounded-full px-3 py-1.5 disabled:opacity-50" }, React.createElement(Icon, { name: "download", size: 13 }), baixando ? "Baixando..." : "Baixar foto")) : null,
+        msg.tipo === "arquivo" && (msg.arquivoBase64 || msg.arquivoId) ? React.createElement("button", { type: "button", onClick: baixar, disabled: baixando, className: "mt-2 flex items-center gap-2 bg-[#f2ece0] rounded-lg px-3 py-2 text-xs font-semibold text-[#33422e] disabled:opacity-50" },
+            React.createElement(Icon, { name: "download", size: 14 }), baixando ? "Baixando..." : (msg.arquivoNome || "Arquivo"), !baixando && React.createElement("span", { className: "font-normal text-stone-500" }, " \u00B7 toque para baixar")) : null,
+        erroBaixar && React.createElement("p", { className: "text-[11px] text-red-600 mt-1" }, erroBaixar));
 }
 
 function TelaComunidade({ onBack, meuNome, souAdmin }) {
@@ -7202,13 +7407,21 @@ function TelaComunidade({ onBack, meuNome, souAdmin }) {
         setEnviando(true);
         setErro("");
         try {
+            let grande = null;
+            const ehArquivo = anexo && anexo.tipo === "arquivo";
+            if (ehArquivo && anexo.dados.length > TAMANHO_ARQUIVO_INLINE) {
+                grande = await subirArquivoGrandeComunidade(anexo.dados, (n, total) => setErro("Enviando arquivo... " + n + "/" + total));
+                setErro("");
+            }
             await enviarMensagemComunidade({
                 texto: texto.trim() || null,
                 autorNome: meuNome,
                 tipo: anexo ? anexo.tipo : "texto",
                 fotoBase64: anexo && anexo.tipo === "foto" ? anexo.dados : null,
-                arquivoBase64: anexo && anexo.tipo === "arquivo" ? anexo.dados : null,
+                arquivoBase64: ehArquivo && !grande ? anexo.dados : null,
                 arquivoNome: anexo ? anexo.nomeArquivo : null,
+                arquivoId: grande ? grande.id : null,
+                arquivoPartes: grande ? grande.partes : 0,
             });
             setTexto("");
             setAnexo(null);
@@ -7505,6 +7718,27 @@ function App() {
     const persistDespesas = useCallback((map) => { setDespesas(map); saveList("despesas_por_talhao", Object.entries(map).map(([talhaoId, itens]) => ({ talhaoId, itens }))); }, []);
     const persistAgendamentos = useCallback((map) => { setAgendamentos(map); saveList("agendamentos_por_talhao", Object.entries(map).map(([talhaoId, itens]) => ({ talhaoId, itens }))); }, []);
     const persistCompras = useCallback((list) => { setCompras(list); saveList("compras", list); }, []);
+    // Migra fotos antigas (que estavam dentro da lista de compras) pro espaço grande, já comprimidas.
+    const comprasRef = useRef([]);
+    comprasRef.current = compras;
+    const migrouFotosRef = useRef(false);
+    useEffect(() => {
+        if (migrouFotosRef.current || !compras.some((c) => c.fotoBase64)) return;
+        migrouFotosRef.current = true;
+        (async () => {
+            const novas = {};
+            for (const c of compras) {
+                if (!c.fotoBase64) continue;
+                try {
+                    let d = c.fotoBase64;
+                    if (d.length > FOTO_COMPRA_MAX) { try { d = await comprimirDataUrl(d, FOTO_COMPRA_MAX, FOTO_COMPRA_LADO); } catch (e) { } }
+                    const r = await fotoCompraSalvar(c.id, d);
+                    if (r.ok) novas[c.id] = r.partes;
+                } catch (e) { }
+            }
+            if (Object.keys(novas).length) persistCompras(comprasRef.current.map((c) => (c.id in novas ? Object.assign({}, c, { fotoBase64: null, temFoto: true, fotoPartes: novas[c.id] }) : c)));
+        })();
+    }, [compras]);
     const persistTabelasCustomizadas = useCallback((list) => { setTabelasCustomizadas(list); saveList("tabelas_customizadas", list); }, []);
     const addTabelaCustomizada = (t) => persistTabelasCustomizadas([...tabelasCustomizadas, t]);
     const updateTabelaCustomizada = (t) => persistTabelasCustomizadas(tabelasCustomizadas.map((x) => (x.id === t.id ? t : x)));
@@ -7646,7 +7880,7 @@ function App() {
         persistAgendamentos({ ...agendamentos, [talhaoId]: atual.filter((x) => x.id !== id) });
     };
     const updateCompra = (c) => persistCompras(compras.map((x) => (x.id === c.id ? c : x)));
-    const deleteCompra = (id) => { bulaRemoverLocal(id); persistCompras(compras.filter((x) => x.id !== id)); };
+    const deleteCompra = (id) => { bulaRemoverLocal(id); fotoCompraRemover(id); persistCompras(compras.filter((x) => x.id !== id)); };
     const selected = talhoes.find((t) => t.id === selectedId);
     if (!ativado) {
         return React.createElement(TelaAssinatura, { onAtivado: () => setAtivado(true) });
