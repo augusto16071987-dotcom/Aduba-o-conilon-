@@ -161,7 +161,18 @@ async function rotinaDiaria() {
     if (Number(cfg.diasAnexos) > 0) limpeza = await limparAnexos(Number(cfg.diasAnexos));
     else limpeza = await limparAnexos(0);   // sem prazo: só tira pedaços soltos
     const m = await medirPasso(false);
-    return { limpeza: limpeza && limpeza.info, medicao: m.feito ? "completa" : "em andamento" };
+    // aviso por e-mail (no máximo 1 a cada 7 dias) quando o espaço passa do limite de alerta
+    let aviso = "";
+    try {
+        const c2 = await lerConfig();
+        const r = resumo(c2);
+        const ultimo = Number(c2.avisoEmailEm) || 0;
+        if (r.alerta && Date.now() - ultimo > 7 * 86400000) {
+            const env = await L.avisarPlanilha({ acao: "aviso_espaco", pct: r.pct, usadoMb: Math.round(r.bytesTotal / 1048576), limiteMb: r.limiteMb, comunidadeMb: Math.round(r.bytesComunidade / 1048576), dadosMb: Math.round(r.bytesDados / 1048576) });
+            if (env.ok) { await salvarConfig({ avisoEmailEm: Date.now() }); aviso = "enviado"; } else aviso = "falhou";
+        }
+    } catch (e) { console.error("aviso espaco:", e); aviso = "erro"; }
+    return { limpeza: limpeza && limpeza.info, medicao: m.feito ? "completa" : "em andamento", aviso };
 }
 
 module.exports = { api, BASE, RAIZ, lerConfig, salvarConfig, DIAS_VALIDOS, medirPasso, limparAnexos, resumo, rotinaDiaria, LIMITE_GRATIS_MB };
