@@ -67,11 +67,14 @@ function statusIrrigacao(dados, agora) {
     const ontem = hojeBR((agora || Date.now()) - 86400000);
     const mmHoje = mapa[hoje] || 0;
     const mmOntem = mapa[ontem] || 0;
+    // chuva dos últimos 7 dias (hoje primeiro) — o app e o controle da irrigação escolhem quantos contar
+    const mmDias = [];
+    for (let i = 0; i < 7; i++) mmDias.push(Math.round((mapa[hojeBR((agora || Date.now()) - i * 86400000)] || 0) * 10) / 10);
     let considerado = 0;
     for (let i = 0; i < cfg.dias; i++) considerado += mapa[hojeBR((agora || Date.now()) - i * 86400000)] || 0;
     return {
         ok: true, pode_irrigar: considerado < cfg.limite,
-        mm_hoje: mmHoje, mm_ontem: mmOntem, mm_considerado: Math.round(considerado * 10) / 10,
+        mm_hoje: mmHoje, mm_ontem: mmOntem, mm_dias: mmDias, mm_considerado: Math.round(considerado * 10) / 10,
         limite: cfg.limite, dias_considerados: cfg.dias,
         ultimo_contato: dados.ultimo ? new Date(Number(dados.ultimo)).toISOString() : "",
     };
