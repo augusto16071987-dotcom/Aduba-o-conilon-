@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-10-v159-sync-texto";
+const APP_VERSION = "build-2026-11-15-v160-recuperar-nuvem";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -1663,6 +1663,21 @@ function getSyncIntervalo() {
 function setSyncIntervalo(min) { try { localStorage.setItem(STORAGE_PREFIX + "sync_intervalo", String(min)); } catch (e) { } }
 function getSyncUltima() { try { return localStorage.getItem(STORAGE_PREFIX + "sync_ultima") || ""; } catch (e) { return ""; } }
 const SYNC_CHAVES = ["talhoes", "analises_por_talhao", "adubacoes_por_talhao", "ocorrencias_por_talhao", "defensivos_por_talhao", "receitas_por_talhao", "despesas_por_talhao", "agendamentos_por_talhao", "compras", "tabelas_customizadas", "chuva_manual"];
+// Traz os dados da nuvem para ESTE aparelho (celular que j\u00E1 tinha dados). Os dados daqui s\u00E3o trocados pelos da nuvem.
+async function recuperarDaNuvem() {
+    try {
+        const at = lerAtivacao();
+        if (!at || !at.codigo) return { ok: false, erro: "Ative o app com seu c\u00F3digo primeiro." };
+        const res = await fetch("/.netlify/functions/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codigo: at.codigo, syncId: "", temDados: false }), cache: "no-store" });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || !j.ok) return { ok: false, erro: j.erro || "N\u00E3o consegui falar com o servidor." };
+        if (!j.syncId) return { ok: false, erro: "Ainda n\u00E3o h\u00E1 dados deste c\u00F3digo na nuvem." };
+        setSyncId(j.syncId);
+        SYNC_CHAVES.forEach((k) => { try { localStorage.removeItem(STORAGE_PREFIX + "sync_meta_" + k); } catch (e) { } });
+        try { window.dispatchEvent(new Event("nutricafe-sync-trocou")); } catch (e) { }
+        return { ok: true };
+    } catch (e) { return { ok: false, erro: "Sem conex\u00E3o com a internet." }; }
+}
 async function sincronizarAgora() {
     if (!syncAtivo()) return { ok: false, erro: "sem-sync" };
     let enviados = 0, falhas = 0;
@@ -6256,7 +6271,22 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                         },
                         className: "w-full flex items-center justify-center gap-2 border border-[#33422e] text-[#33422e] rounded-lg py-3 text-sm font-semibold active:bg-stone-100 disabled:opacity-50"
                     }, sincronizando ? "Sincronizando..." : "Sincronizar agora"),
-                    React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "Funciona enquanto o app est\u00E1 aberto (ou ao voltar pra ele e quando a internet volta). Tudo que voc\u00EA salva j\u00E1 vai pra nuvem na hora; isso aqui reenvia o que ficou pendente e avisa se outro aparelho salvou algo mais novo."))),
+                    React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "Funciona enquanto o app est\u00E1 aberto (ou ao voltar pra ele e quando a internet volta). Tudo que voc\u00EA salva j\u00E1 vai pra nuvem na hora; isso aqui reenvia o que ficou pendente e avisa se outro aparelho salvou algo mais novo.")),
+                React.createElement("div", { className: "mt-4 pt-4 border-t border-stone-200" },
+                    React.createElement("p", { className: "text-sm font-semibold text-stone-800 mb-1" }, "Recuperar dados da nuvem"),
+                    React.createElement("p", { className: "text-xs text-stone-500 mb-2" }, "Use se este celular est\u00E1 sem os seus dados (ou com dados diferentes). Os dados daqui ser\u00E3o trocados pelos que est\u00E3o na nuvem, ligados ao seu c\u00F3digo de ativa\u00E7\u00E3o. Se tiver algo s\u00F3 daqui que n\u00E3o quer perder, fa\u00E7a antes o Backup."),
+                    React.createElement("button", {
+                        disabled: sincronizando || !syncAtivo(),
+                        onClick: async () => {
+                            if (!window.confirm("Trocar os dados deste celular pelos da nuvem? N\u00E3o d\u00E1 para desfazer.")) return;
+                            setSincronizando(true);
+                            const r = await recuperarDaNuvem();
+                            setSincronizando(false);
+                            setMensagemSync(r.ok ? "Pronto! Dados da nuvem recuperados." : (r.erro || "N\u00E3o consegui recuperar agora."));
+                            if (r.ok) setTimeout(() => onDadosRestaurados(), 800);
+                        },
+                        className: "w-full border border-[#a8442f] text-[#a8442f] rounded-lg py-3 text-sm font-semibold active:bg-stone-100 disabled:opacity-50"
+                    }, "Recuperar dados da nuvem"))),
             React.createElement(SecaoColapsavel, { titulo: "Backup dos dados", aberta: secaoAberta === "backup", onToggle: () => alternarSecao("backup") },
                 React.createElement("p", { className: "text-sm text-stone-600 mb-3" }, "Todos os dados do app (talh\u00F5es, an\u00E1lises, aduba\u00E7\u00F5es, pragas, compras, financeiro) ficam salvos s\u00F3 neste celular/navegador. Se desinstalar o app, trocar de celular ou limpar os dados do navegador, essas informa\u00E7\u00F5es se perdem \u2014 a menos que voc\u00EA tenha um backup salvo."),
                 React.createElement("button", { onClick: baixarBackup, className: "w-full flex items-center justify-center gap-2 bg-[#33422e] text-white rounded-lg py-3 text-sm font-semibold active:bg-[#252f20]" },
