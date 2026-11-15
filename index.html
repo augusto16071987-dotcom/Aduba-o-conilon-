@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v160-recuperar-nuvem";
+const APP_VERSION = "build-2026-11-15-v161-recuperar-nuvem";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -6140,6 +6140,7 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
     const [syncIdEditando, setSyncIdEditando] = useState(getSyncId() || "");
     const [backupPendente, setBackupPendente] = useState(null);
     const [mensagemSync, setMensagemSync] = useState("");
+    const [confirmRecuperar, setConfirmRecuperar] = useState(false);
     const [syncIntervaloSel, setSyncIntervaloSel] = useState(getSyncIntervalo());
     const [sincronizando, setSincronizando] = useState(false);
     const [syncUltimaTxt, setSyncUltimaTxt] = useState(getSyncUltima() ? new Date(getSyncUltima()).toLocaleString("pt-BR") : "");
@@ -6277,16 +6278,23 @@ function TelaConfiguracoes({ onBack, onDadosRestaurados, tabelasCustomizadas, on
                     React.createElement("p", { className: "text-xs text-stone-500 mb-2" }, "Use se este celular est\u00E1 sem os seus dados (ou com dados diferentes). Os dados daqui ser\u00E3o trocados pelos que est\u00E3o na nuvem, ligados ao seu c\u00F3digo de ativa\u00E7\u00E3o. Se tiver algo s\u00F3 daqui que n\u00E3o quer perder, fa\u00E7a antes o Backup."),
                     React.createElement("button", {
                         disabled: sincronizando || !syncAtivo(),
-                        onClick: async () => {
-                            if (!window.confirm("Trocar os dados deste celular pelos da nuvem? N\u00E3o d\u00E1 para desfazer.")) return;
+                        onClick: () => setConfirmRecuperar(true),
+                        className: "w-full border border-[#a8442f] text-[#a8442f] rounded-lg py-3 text-sm font-semibold active:bg-stone-100 disabled:opacity-50"
+                    }, "Recuperar dados da nuvem"),
+                    confirmRecuperar && React.createElement(ConfirmModal, {
+                        titulo: "Recuperar dados da nuvem?",
+                        mensagem: "Os dados deste celular ser\u00E3o trocados pelos que est\u00E3o na nuvem. N\u00E3o d\u00E1 para desfazer.",
+                        textoConfirmar: "Recuperar",
+                        onCancel: () => setConfirmRecuperar(false),
+                        onConfirm: async () => {
+                            setConfirmRecuperar(false);
                             setSincronizando(true);
                             const r = await recuperarDaNuvem();
                             setSincronizando(false);
                             setMensagemSync(r.ok ? "Pronto! Dados da nuvem recuperados." : (r.erro || "N\u00E3o consegui recuperar agora."));
                             if (r.ok) setTimeout(() => onDadosRestaurados(), 800);
                         },
-                        className: "w-full border border-[#a8442f] text-[#a8442f] rounded-lg py-3 text-sm font-semibold active:bg-stone-100 disabled:opacity-50"
-                    }, "Recuperar dados da nuvem"))),
+                    }))),
             React.createElement(SecaoColapsavel, { titulo: "Backup dos dados", aberta: secaoAberta === "backup", onToggle: () => alternarSecao("backup") },
                 React.createElement("p", { className: "text-sm text-stone-600 mb-3" }, "Todos os dados do app (talh\u00F5es, an\u00E1lises, aduba\u00E7\u00F5es, pragas, compras, financeiro) ficam salvos s\u00F3 neste celular/navegador. Se desinstalar o app, trocar de celular ou limpar os dados do navegador, essas informa\u00E7\u00F5es se perdem \u2014 a menos que voc\u00EA tenha um backup salvo."),
                 React.createElement("button", { onClick: baixarBackup, className: "w-full flex items-center justify-center gap-2 bg-[#33422e] text-white rounded-lg py-3 text-sm font-semibold active:bg-[#252f20]" },
