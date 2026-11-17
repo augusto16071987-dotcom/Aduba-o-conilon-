@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v161-recuperar-nuvem";
+const APP_VERSION = "build-2026-11-15-v162-zerar-estoque-datas";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -3568,6 +3568,8 @@ function calcularEstoque(compras, adubacoesPorTalhao, defensivosPorTalhao, despe
             garantir(d.produto).aplicado += usado;
         });
         ((despesasPorTalhao || {})[t.id] || []).forEach((d) => {
+            // baixa manual de estoque ("Zerar estoque"): quantidade j\u00E1 guardada em kg ou L
+            if (d.baixaEstoque) { if (d.produtoBaixa) garantir(d.produtoBaixa).aplicado += Number(d.quantidadeProduto) || 0; return; }
             if (d.categoria !== "Herbicida" || !d.descricao || !d.quantidadeProduto) return;
             const un = d.unidadeProduto || "mL";
             const base = un === "mL" || un === "g" ? Number(d.quantidadeProduto) / 1000 : Number(d.quantidadeProduto);
@@ -5324,6 +5326,60 @@ function BotaoBula({ compra }) {
             "\uD83D\uDCC4 ", abrindo ? "Abrindo..." : "Ver bula"),
         erro && React.createElement("p", { className: "text-[11px] text-[#a8442f] mt-1" }, erro));
 }
+/* ---- Zerar estoque: lan\u00E7a o que sobrou como consumo/despesa nos setores escolhidos ---- */
+function ZerarEstoqueModal({ item, compras, talhoes, onClose, onConfirm }) {
+    const info = precoUnitarioDoProduto(item.produto, compras);
+    const saldo = Math.max(0, item.saldo);
+    const valorSugerido = info ? Math.round(info.precoPorBase * saldo * 100) / 100 : 0;
+    const hojeISO = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const [data, setData] = useState(hojeISO);
+    const [sel, setSel] = useState([]);
+    const [modo, setModo] = useState("ratear");
+    const [valor, setValor] = useState(String(valorSugerido));
+    const toggle = (id) => setSel((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    const n = sel.length;
+    const valorNum = Number(valor) || 0;
+    const porTalhao = n > 0 ? (modo === "ratear" ? valorNum / n : valorNum) : 0;
+    const confirmar = () => {
+        if (n === 0) return;
+        const qtdCada = saldo / n;
+        const registros = talhoes.filter((t) => sel.includes(t.id)).map((t) => ({
+            talhaoId: t.id,
+            dados: {
+                id: uid(), data, categoria: item.categoria === "Herbicida" ? "Herbicida" : "Gasto geral",
+                descricao: "Baixa de estoque: " + item.produto, valorTotal: Number(porTalhao.toFixed(2)),
+                baixaEstoque: true, produtoBaixa: item.produto, quantidadeProduto: Number(qtdCada.toFixed(4)), unidadeProduto: item.unidade,
+                rateioTotal: modo === "ratear" && n > 1 ? valorNum : null, rateioQtdTalhoes: modo === "ratear" && n > 1 ? n : null,
+                replicadoQtdTalhoes: modo === "replicar" && n > 1 ? n : null,
+                obs: "Estoque zerado manualmente (sobra de " + fmtBR(saldo, 1) + " " + item.unidade + ").",
+            },
+        }));
+        onConfirm(registros);
+    };
+    return (React.createElement("div", { className: "fixed inset-0 z-[60] flex items-end bg-black/40", onClick: onClose },
+        React.createElement("div", { className: "w-full bg-white rounded-t-2xl p-4 pb-6 max-h-[90vh] overflow-y-auto", onClick: (e) => e.stopPropagation() },
+            React.createElement("h3", { className: "font-bold text-stone-800 text-center" }, "Zerar estoque"),
+            React.createElement("p", { className: "text-sm text-stone-500 text-center mb-3" }, item.produto, " \u2014 sobra de ", fmtBR(saldo, 1), " ", item.unidade),
+            React.createElement("p", { className: "text-xs text-stone-500 mb-3" }, "Use quando o produto j\u00E1 acabou mas faltou registrar a aplica\u00E7\u00E3o. A sobra vira consumo e o valor entra como despesa nos setores que voc\u00EA escolher."),
+            React.createElement(Field, { label: "Data" }, React.createElement("input", { type: "date", className: inputCls, value: data, onChange: (e) => setData(e.target.value) })),
+            React.createElement(Field, { label: "Valor a lan\u00E7ar como despesa (R$)" },
+                React.createElement(NumInput, { value: valor, onChange: (e) => setValor(e.target.value), placeholder: "0,00" }),
+                React.createElement("span", { className: "block text-[11px] text-stone-400 mt-1" }, info ? "Calculado pelo pre\u00E7o da \u00FAltima compra (R$ " + fmtBR(info.precoPorBase, 2) + "/" + item.unidade + "). Pode ajustar." : "Sem pre\u00E7o de compra encontrado \u2014 digite o valor (ou 0).")),
+            React.createElement("div", { className: "bg-[#f2ece0] rounded-lg p-3 mb-3" },
+                React.createElement("p", { className: "text-xs font-semibold text-stone-600 mb-1" }, "Em quais setores esse produto foi usado?"),
+                talhoes.map((t) => (React.createElement("label", { key: t.id, className: "flex items-center justify-between gap-2 py-1.5 text-sm text-stone-700" },
+                    React.createElement("span", { className: "flex items-center gap-2" },
+                        React.createElement("input", { type: "checkbox", checked: sel.includes(t.id), onChange: () => toggle(t.id), className: "w-4 h-4 accent-[#33422e]" }),
+                        t.nome),
+                    React.createElement("span", { className: "text-xs text-stone-400" }, fmtBR(Number(t.area) || 0, 2), " ha")))),
+                n > 1 && React.createElement("div", { className: "mt-2" }, React.createElement(ChoiceRow, { options: [["ratear", "Dividir o valor entre eles"], ["replicar", "Mesmo valor em cada"]], value: modo, onChange: setModo })),
+                n > 0 && React.createElement("p", { className: "text-xs text-[#8a6d3b] mt-2" }, modo === "ratear" || n === 1 ? "R$ " + fmtBR(porTalhao, 2) + " em " + (n === 1 ? "1 setor" : "cada um dos " + n + " setores") + "." : "R$ " + fmtBR(porTalhao, 2) + " em cada um (total R$ " + fmtBR(porTalhao * n, 2) + ")."),
+                n === 0 && React.createElement("p", { className: "text-xs text-stone-400 mt-2" }, "Marque pelo menos um setor.")),
+            React.createElement("div", { className: "grid grid-cols-2 gap-2" },
+                React.createElement("button", { type: "button", onClick: onClose, className: "py-3 rounded-xl border border-stone-300 text-stone-600 font-semibold text-sm" }, "Cancelar"),
+                React.createElement("button", { type: "button", disabled: n === 0 || saldo <= 0, onClick: confirmar, className: "py-3 rounded-xl bg-[#a8442f] text-white font-semibold text-sm disabled:opacity-40" }, "Zerar estoque")),
+            React.createElement("p", { className: "text-[11px] text-stone-400 mt-2 text-center" }, "Para desfazer, apague a despesa \"Baixa de estoque\" no talh\u00E3o."))));
+}
 function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos, talhoes, onAdd, onUpdate, onDelete, receitas, onAddReceita, onAddReceitaEmLote, onUpdateReceita, onDeleteReceita, onAddDespesaEmLote, onBack }) {
     const [showForm, setShowForm] = useState(false);
     const [editando, setEditando] = useState(null);
@@ -5333,6 +5389,9 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos,
     useEffect(() => { window.scrollTo(0, 0); }, [aba]);
     const estoque = calcularEstoque(compras, adubacoes, defensivos, despesas, talhoes, agendamentos);
     const [categoriaFiltroEstoque, setCategoriaFiltroEstoque] = useState("todas");
+    const [zerando, setZerando] = useState(null);
+    const [dataDe, setDataDe] = useState("");
+    const [dataAte, setDataAte] = useState("");
     const estoqueFiltrado = categoriaFiltroEstoque === "todas" ? estoque : estoque.filter((i) => i.categoria === categoriaFiltroEstoque);
     const anoAtual = new Date().getFullYear();
     const anoDe = (item) => Number(String(item.data).slice(0, 4));
@@ -5340,7 +5399,8 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos,
     const receitasFlat = Object.entries(receitas || {}).flatMap(([talhaoId, itens]) => itens.map((r) => ({ ...r, talhaoId })));
     const anos = Array.from(new Set([anoAtual, ...compras.map(anoDe), ...receitasFlat.map(anoDe)])).sort((a, b) => b - a);
     const [ano, setAno] = useState(anoAtual);
-    const comprasDoAno = compras.filter((c) => anoDe(c) === ano).sort((a, b) => (a.data < b.data ? 1 : -1));
+    const usandoPeriodo = !!(dataDe || dataAte);
+    const comprasDoAno = (usandoPeriodo ? compras.filter((c) => (!dataDe || c.data >= dataDe) && (!dataAte || c.data <= dataAte)) : compras.filter((c) => anoDe(c) === ano)).sort((a, b) => (a.data < b.data ? 1 : -1));
     const totalAno = comprasDoAno.reduce((s, c) => s + (Number(c.valorTotal) || 0), 0);
     const [categoriaFiltro, setCategoriaFiltro] = useState("todas");
     const [comprasExpandidas, setComprasExpandidas] = useState({});
@@ -5409,7 +5469,8 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos,
                             fmtBR(i.reservado, 1), " ", i.unidade, " reservado p/ agendamentos pendentes",
                             faltante > 0.001 ? (" \u2014 falta " + fmtBR(faltante, 1) + " " + i.unidade) : ""),
                         st === "acabou" && React.createElement("p", { className: "text-[11px] font-semibold text-[#a8442f] mt-0.5" }, "Estoque zerado \u2014 compre mais antes da pr\u00F3xima aplica\u00E7\u00E3o"),
-                        st === "baixo" && React.createElement("p", { className: "text-[11px] font-semibold text-[#c98a2c] mt-0.5" }, "Estoque baixo"));
+                        st === "baixo" && React.createElement("p", { className: "text-[11px] font-semibold text-[#c98a2c] mt-0.5" }, "Estoque baixo"),
+                        i.saldo > 0.001 && React.createElement("button", { type: "button", onClick: () => setZerando(i), className: "mt-2 text-xs font-semibold text-[#a8442f] border border-[#e0b3a8] rounded-lg px-3 py-1.5 active:bg-[#fbeeea]" }, "Zerar estoque"));
                 }),
                 React.createElement("p", { className: "text-xs text-stone-400 px-1 mt-2" }, "O saldo \u00E9 o total comprado menos o total j\u00E1 aplicado nos talh\u00F5es. S\u00F3 fica certo se todas as aplica\u00E7\u00F5es forem registradas. Defensivos aplicados em dose por calda (mL/L) n\u00E3o entram na conta, porque n\u00E3o d\u00E1 pra saber o total sem o volume aplicado."))
             ) : aba === "financeiro" ? (React.createElement(React.Fragment, null,
@@ -5455,6 +5516,14 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos,
                 anos.map((a) => (React.createElement("button", { key: a, onClick: () => setAno(a), className: `px-3 py-1 rounded-full text-xs font-semibold shrink-0 ${ano === a ? "bg-[#33422e] text-white" : "bg-white text-stone-500 border border-stone-200"}` },
                     a,
                     a === anoAtual ? " (atual)" : "")))),
+            React.createElement("div", { className: "bg-white rounded-xl border border-stone-200 p-3" },
+                React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase mb-2" }, "Filtrar por datas"),
+                React.createElement("div", { className: "grid grid-cols-2 gap-2" },
+                    React.createElement("label", { className: "block" }, React.createElement("span", { className: "block text-[11px] text-stone-400 mb-0.5" }, "De"), React.createElement("input", { type: "date", className: inputCls, value: dataDe, onChange: (e) => setDataDe(e.target.value) })),
+                    React.createElement("label", { className: "block" }, React.createElement("span", { className: "block text-[11px] text-stone-400 mb-0.5" }, "At\u00E9"), React.createElement("input", { type: "date", className: inputCls, value: dataAte, onChange: (e) => setDataAte(e.target.value) }))),
+                usandoPeriodo && React.createElement("div", { className: "flex items-center justify-between mt-2" },
+                    React.createElement("span", { className: "text-[11px] text-stone-400" }, "Mostrando o per\u00EDodo escolhido (de todos os anos)."),
+                    React.createElement("button", { type: "button", onClick: () => { setDataDe(""); setDataAte(""); }, className: "text-xs font-semibold text-[#a8442f]" }, "Limpar datas"))),
             React.createElement(Field, { label: "Filtrar por categoria" },
                 React.createElement("select", { className: inputCls, value: categoriaFiltro, onChange: (e) => setCategoriaFiltro(e.target.value) },
                     React.createElement("option", { value: "todas" }, "Todas as categorias (", comprasDoAno.length, ")"),
@@ -5465,15 +5534,13 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos,
                     }))),
             React.createElement("div", { className: "bg-white rounded-xl border border-stone-200 p-3 flex items-center justify-between" },
                 React.createElement("span", { className: "text-sm text-stone-500" },
-                    "Total ", categoriaFiltro !== "todas" ? `de ${categoriaFiltro} ` : "", "em ",
-                    ano),
+                    "Total ", categoriaFiltro !== "todas" ? `de ${categoriaFiltro} ` : "", usandoPeriodo ? "no per\u00EDodo" : "em " + ano),
                 React.createElement("span", { className: "font-bold text-[#a8442f] text-lg" },
                     "R$ ",
                     fmtBR(totalFiltrado, 2))),
             comprasDoAnoFiltradas.length === 0 && (React.createElement("p", { className: "text-center text-stone-400 text-sm py-6" },
-                categoriaFiltro === "todas" ? "Nenhuma compra registrada em " : `Nenhuma compra de ${categoriaFiltro} registrada em `,
-                ano,
-                ".")),
+                categoriaFiltro === "todas" ? "Nenhuma compra registrada " : `Nenhuma compra de ${categoriaFiltro} registrada `,
+                usandoPeriodo ? "no per\u00EDodo." : "em " + ano + ".")),
             comprasDoAnoFiltradas.map((c) => (React.createElement("div", { key: c.id, className: "bg-white border border-stone-200 rounded-2xl shadow-sm p-3 flex items-start gap-3" },
                 (c.fotoBase64 || c.temFoto) ? (
                     React.createElement(FotoCompra, { compra: c, className: "w-9 h-9 rounded-full object-cover shrink-0", vazio: React.createElement("div", { className: "w-9 h-9 rounded-full bg-stone-200 shrink-0" }) })
@@ -5495,6 +5562,7 @@ function ComprasScreen({ compras, adubacoes, defensivos, despesas, agendamentos,
                     c.obs && (React.createElement("button", { onClick: () => toggleCompraExpandida(c.id), className: "text-[10px] text-[#4c6146] font-semibold mt-1 flex items-center gap-1" },
                         comprasExpandidas[c.id] ? "Ocultar detalhes \u25B2" : "Ver detalhes \u25BC")),
                     c.obs && comprasExpandidas[c.id] && (React.createElement("p", { className: "text-xs text-stone-400 italic mt-1" }, c.obs)))))))),
+        zerando && React.createElement(ZerarEstoqueModal, { item: zerando, compras: compras, talhoes: talhoes, onClose: () => setZerando(null), onConfirm: (registros) => { onAddDespesaEmLote(registros); setZerando(null); } }),
         showForm && (React.createElement(CompraForm, { talhoes: talhoes, onClose: () => setShowForm(false), onSave: (c) => {
                 const { despesaRegistros, ...compraObj } = c;
                 onAdd(compraObj);
@@ -5616,7 +5684,7 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
     const totalComprasAno = comprasDoAno.reduce((s, c) => s + (Number(c.valorTotal) || 0), 0);
     // segunda visão do custo por saca: considera TUDO que já saiu do bolso
     // (compras do ano + despesas gerais), não só o que já foi aplicado no campo
-    const totalDespesasGerais = linhas.reduce((s, l) => s + l.ds.reduce((x, d) => x + (Number(d.valorTotal) || 0), 0), 0);
+    const totalDespesasGerais = linhas.reduce((s, l) => s + l.ds.filter((d) => !d.baixaEstoque).reduce((x, d) => x + (Number(d.valorTotal) || 0), 0), 0);
     const desembolsoTotal = totalComprasAno + totalDespesasGerais;
     const custoPorSacaDesembolso = sacasEsperadasTotal > 0 ? desembolsoTotal / sacasEsperadasTotal : null;
     const despesasPorCategoria = {};
