@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v162-zerar-estoque-datas";
+const APP_VERSION = "build-2026-11-15-v163-vencimentos-suporte";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -7230,6 +7230,68 @@ function PainelEspaco({ onBack, resumoInicial, onResumo }) {
                     React.createElement("input", { className: inputCls, inputMode: "numeric", value: limite, onChange: (e) => setLimite(e.target.value) }),
                     React.createElement("button", { onClick: salvarLimite, disabled: !!ocupado, className: "px-4 rounded-lg bg-[#33422e] text-white font-semibold disabled:opacity-40" }, "Salvar")))));
 }
+/* ---- Suporte: vencimentos de clientes (perto de vencer, vence hoje, j\u00E1 venceu) com bot\u00E3o de WhatsApp ---- */
+const DIAS_PERTO_VENCER = 7;
+function dataBR(ms) { const d = new Date(ms - 3 * 3600 * 1000); const p = (n) => String(n).padStart(2, "0"); return p(d.getUTCDate()) + "/" + p(d.getUTCMonth() + 1) + "/" + d.getUTCFullYear(); }
+function diasCalendario(ms) { const dia = (t) => Math.floor((t - 3 * 3600 * 1000) / 86400000); return dia(ms) - dia(Date.now()); }
+function classificarVencimentos(lista) {
+    const hoje = dataBR(Date.now());
+    const grupos = { perto: [], hoje: [], vencidos: [] };
+    (lista || []).forEach((c) => {
+        if (c.vencimento === hoje) grupos.hoje.push(c);
+        else if (c.ativo && diasCalendario(c.validoAte) <= DIAS_PERTO_VENCER) grupos.perto.push(c);
+        else if (!c.ativo) grupos.vencidos.push(c);
+    });
+    grupos.perto.sort((a, b) => a.validoAte - b.validoAte);
+    grupos.vencidos.sort((a, b) => b.validoAte - a.validoAte);
+    return grupos;
+}
+function msgVencimento(c, grupo) {
+    const nome = String(c.nome || "").split(" ")[0];
+    const fim = " Para renovar, acesse nutricafe.app.br e toque em \u201CJ\u00E1 sou cliente: renovar\u201D (PIX ou cart\u00E3o). Qualquer d\u00FAvida, \u00E9 s\u00F3 responder aqui.";
+    if (grupo === "hoje") return "Ol\u00E1, " + nome + "! Seu acesso ao NutriCaf\u00E9 vence hoje (" + c.vencimento + ")." + fim;
+    if (grupo === "vencidos") return "Ol\u00E1, " + nome + "! Seu acesso ao NutriCaf\u00E9 venceu em " + c.vencimento + ". Sentimos sua falta!" + fim;
+    return "Ol\u00E1, " + nome + "! Seu acesso ao NutriCaf\u00E9 vence em " + c.vencimento + " (" + (diasCalendario(c.validoAte) === 1 ? "amanh\u00E3" : "em " + diasCalendario(c.validoAte) + " dias") + ")." + fim;
+}
+function TelaVencimentos({ onBack }) {
+    const [lista, setLista] = useState(null);
+    const [erro, setErro] = useState("");
+    const [carregando, setCarregando] = useState(false);
+    const carregar = async () => {
+        setCarregando(true); setErro("");
+        try {
+            const res = await fetch("/.netlify/functions/liberar-manual", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ senha: SUPORTE_SENHA, acao: "listar" }) });
+            const j = await res.json().catch(() => ({}));
+            if (!res.ok) setErro(j.erro || "N\u00E3o consegui carregar."); else setLista(j.clientes || []);
+        } catch (e) { setErro("N\u00E3o foi poss\u00EDvel conectar agora."); }
+        setCarregando(false);
+    };
+    useEffect(() => { carregar(); }, []);
+    const g = classificarVencimentos(lista);
+    const linha = (c, grupo) => React.createElement("div", { key: c.codigo, className: "border-b border-stone-100 py-2.5 flex items-center gap-2" },
+        React.createElement("div", { className: "flex-1 min-w-0" },
+            React.createElement("p", { className: "text-sm font-semibold text-stone-800 truncate" }, c.nome),
+            React.createElement("p", { className: "text-xs " + (grupo === "vencidos" ? "text-[#a8442f]" : "text-stone-500") },
+                (grupo === "vencidos" ? "venceu em " : grupo === "hoje" ? "vence hoje, " : "vence em ") + c.vencimento + (grupo === "perto" ? " (" + (diasCalendario(c.validoAte) === 1 ? "amanh\u00E3" : diasCalendario(c.validoAte) + " dias") + ")" : "") + " \u2022 " + c.codigo)),
+        c.whatsapp
+            ? React.createElement("a", { href: "https://wa.me/" + c.whatsapp + "?text=" + encodeURIComponent(msgVencimento(c, grupo)), target: "_blank", rel: "noopener", className: "shrink-0 bg-[#25a244] text-white text-xs font-semibold rounded-lg px-3 py-2" }, "WhatsApp")
+            : React.createElement("span", { className: "shrink-0 text-[11px] text-stone-400" }, "sem WhatsApp"));
+    const secao = (titulo, cor, itens, grupo, vazio) => React.createElement("div", { className: "bg-white rounded-2xl border border-stone-200 p-4" },
+        React.createElement("p", { className: "text-sm font-bold mb-1", style: { color: cor } }, titulo + " (" + itens.length + ")"),
+        itens.length === 0 ? React.createElement("p", { className: "text-xs text-stone-400" }, vazio) : itens.map((c) => linha(c, grupo)));
+    return React.createElement("div", { className: "min-h-screen bg-[#f2ece0]" },
+        React.createElement("div", { className: "bg-[#33422e] px-4 pt-5 pb-3 flex items-center gap-3 sticky top-0 z-10" },
+            React.createElement("button", { onClick: onBack, className: "text-[#cdd7c4]" }, React.createElement(Icon, { name: "chevronLeft", size: 22 })),
+            React.createElement("h1", { className: "text-white font-bold text-base" }, "\u23F0 Vencimentos")),
+        React.createElement("div", { className: "px-4 py-4 space-y-4 max-w-md mx-auto" },
+            erro && React.createElement("p", { className: "text-sm text-[#a8442f]" }, erro),
+            carregando && !lista && React.createElement("p", { className: "text-sm text-stone-500" }, "Carregando..."),
+            lista && secao("Vencem hoje", "#a8442f", g.hoje, "hoje", "Ningu\u00E9m vence hoje."),
+            lista && secao("Perto de vencer (at\u00E9 " + DIAS_PERTO_VENCER + " dias)", "#c98a2c", g.perto, "perto", "Ningu\u00E9m perto de vencer."),
+            lista && secao("J\u00E1 venceram", "#6b6b6b", g.vencidos, "vencidos", "Nenhum cliente vencido."),
+            lista && React.createElement("p", { className: "text-[11px] text-stone-400" }, "O bot\u00E3o abre o WhatsApp com a mensagem pronta; voc\u00EA s\u00F3 confere e envia. Para renovar o acesso, use \"Acessos e assinaturas\"."),
+            React.createElement("button", { onClick: carregar, disabled: carregando, className: "w-full border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-2.5 text-sm disabled:opacity-40" }, carregando ? "Atualizando..." : "Atualizar lista")));
+}
 function TelaSuporte() {
     const [syncId, setSyncId] = useState("");
     const [carregando, setCarregando] = useState(false);
@@ -7242,6 +7304,9 @@ function TelaSuporte() {
     const [showLiberar, setShowLiberar] = useState(false);
     const [showModerarChat, setShowModerarChat] = useState(false);
     const [showEspaco, setShowEspaco] = useState(false);
+    const [showVenc, setShowVenc] = useState(false);
+    const [contVenc, setContVenc] = useState(null);
+    useEffect(() => { if (!SUPORTE_SENHA) return; fetch("/.netlify/functions/liberar-manual", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ senha: SUPORTE_SENHA, acao: "listar" }) }).then((r) => r.json()).then((j) => { if (j && j.clientes) { const g = classificarVencimentos(j.clientes); setContVenc({ hoje: g.hoje.length, perto: g.perto.length, vencidos: g.vencidos.length }); } }).catch(() => { }); }, [showVenc]);
     const [resumoEspaco, setResumoEspaco] = useState(null);
     useEffect(() => { if (SUPORTE_SENHA) chamarAnexos({ acao: "status" }).then((j) => setResumoEspaco(j.resumo)).catch(() => { }); }, []);
     const noop = () => {};
@@ -7299,6 +7364,9 @@ function TelaSuporte() {
     if (showModerarChat) {
         return React.createElement(TelaComunidade, { onBack: () => setShowModerarChat(false), meuNome: "Suporte", souAdmin: true });
     }
+    if (showVenc) {
+        return React.createElement(TelaVencimentos, { onBack: () => setShowVenc(false) });
+    }
     if (showEspaco) {
         return React.createElement(PainelEspaco, { onBack: () => setShowEspaco(false), resumoInicial: resumoEspaco, onResumo: setResumoEspaco });
     }
@@ -7311,6 +7379,7 @@ function TelaSuporte() {
                 React.createElement("input", { className: inputCls, placeholder: "Ex: sitio-vlt3ys", value: syncId, onChange: function (e) { setSyncId(e.target.value); setErro(""); }, onKeyDown: function (e) { if (e.key === "Enter") carregar(); } }),
                 erro ? React.createElement("p", { className: "text-xs text-[#a8442f] mt-2" }, erro) : null,
                 React.createElement("button", { onClick: carregar, disabled: !syncId.trim() || carregando, className: "w-full mt-4 bg-[#33422e] text-white font-semibold rounded-lg py-3 disabled:opacity-40" }, carregando ? "Carregando..." : "Carregar dados"),
+                React.createElement("button", { onClick: () => setShowVenc(true), className: "w-full mt-3 border font-semibold rounded-lg py-3 " + (contVenc && (contVenc.hoje + contVenc.perto) > 0 ? "border-[#c98a2c] text-[#8a6d3b]" : "border-[#33422e] text-[#33422e]") }, "\u23F0 Vencimentos" + (contVenc ? " (" + contVenc.hoje + " hoje \u00B7 " + contVenc.perto + " perto \u00B7 " + contVenc.vencidos + " vencidos)" : "")),
                 React.createElement("button", { onClick: () => setShowLiberar(true), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "\ud83d\udd13 Acessos e assinaturas"),
                 React.createElement("button", { onClick: () => setShowModerarChat(true), className: "w-full mt-3 border border-[#33422e] text-[#33422e] font-semibold rounded-lg py-3" }, "\ud83d\udcac Moderar comunidade (chat)"),
                 React.createElement("button", { onClick: () => setShowEspaco(true), className: "w-full mt-3 border font-semibold rounded-lg py-3 " + (resumoEspaco && resumoEspaco.alerta ? "border-[#a8442f] text-[#a8442f] bg-red-50" : "border-[#33422e] text-[#33422e]") }, (resumoEspaco && resumoEspaco.alerta ? "\u26a0\ufe0f " : "\ud83d\udcbe ") + "Espa\u00e7o e limpeza" + (resumoEspaco && resumoEspaco.medidoEm ? " (" + String(resumoEspaco.pct).replace(".", ",") + "% usado)" : "")),
