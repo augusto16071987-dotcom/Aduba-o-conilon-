@@ -3,7 +3,7 @@
 // acao:"listar" lista clientes; acao:"criar" cria acesso manual (nome+email+meses).
 // "busca" pode ser código, e-mail ou parte do nome. Soma N meses.
 const L = require("./lib/firestore");
-const VERSAO = "v7-senha-env-2026-10-17";
+const VERSAO = "v8-pedidos-teste-2026-11-17";
 
 exports.handler = async (event) => {
     if (event.httpMethod === "OPTIONS") return L.resp(200, {});
@@ -46,6 +46,38 @@ exports.handler = async (event) => {
             await L.excluirDocs(ids);
             await L.avisarPlanilha({ acao: "exclusao", codigo: cod, nome: c.dados.nome, email: c.dados.email });
             return L.resp(200, { ok: true, excluido: cod, nuvemApagados, versao: VERSAO });
+        }
+        // ---- pedidos de teste vindos da página de divulgação ----
+        const ID_PEDIDO = /^t_[a-f0-9]{20}$/;
+        if (b.acao === "pedidos") {
+            const todos = await L.listarTodos("t_");
+            const agora = Date.now();
+            const lista = [];
+            for (const x of todos) {
+                const ex = x.dados.emailCanon ? await L.lerDoc(L.idEmail(x.dados.emailCanon)) : null;
+                let ja = null;
+                if (ex) { const c = await L.lerDoc("c_" + ex.dados.codigo); if (c) ja = { codigo: c.dados.codigo, vencimento: L.fmtData(Number(c.dados.validoAte)), ativo: Number(c.dados.validoAte) > agora }; }
+                lista.push({ id: x.id, nome: x.dados.nome, email: x.dados.email, whatsapp: x.dados.whatsapp || "", criadoEm: Number(x.dados.criadoEm) || 0, quando: L.fmtData(Number(x.dados.criadoEm) || agora), jaCliente: ja });
+            }
+            lista.sort((p, q) => q.criadoEm - p.criadoEm);
+            return L.resp(200, { ok: true, pedidos: lista, versao: VERSAO });
+        }
+        if (b.acao === "descartar-pedido") {
+            if (!ID_PEDIDO.test(String(b.id || ""))) return L.resp(400, { erro: "Pedido inválido." });
+            await L.excluirDocs([b.id]);
+            return L.resp(200, { ok: true });
+        }
+        if (b.acao === "liberar-pedido") {
+            if (!ID_PEDIDO.test(String(b.id || ""))) return L.resp(400, { erro: "Pedido inválido." });
+            const m = Math.round(Number(b.meses) || 1);
+            if (!(m >= 1 && m <= 36)) return L.resp(400, { erro: "Meses deve ser de 1 a 36." });
+            const ped = await L.lerDoc(b.id);
+            if (!ped) return L.resp(404, { erro: "Pedido não encontrado (talvez já liberado)." });
+            const r = await L.ativarOuRenovar({ nome: ped.dados.nome, email: ped.dados.email, meses: m, whatsapp: ped.dados.whatsapp, marca: { liberadoManual: true } });
+            await L.avisarPlanilha({ acao: r.novo ? "ativacao" : "renovacao", syncId: r.dados.syncId || "", nome: r.dados.nome, email: r.dados.email, codigo: r.codigo,
+                plano: (m === 1 ? "1 mês (teste)" : m + " meses"), valor: 0, manual: true, inicio: L.fmtData(Date.now()), vencimento: L.fmtData(r.validoAte) });
+            await L.excluirDocs([b.id]);
+            return L.resp(200, { ok: true, nome: r.dados.nome, email: r.dados.email, whatsapp: ped.dados.whatsapp || "", codigo: r.codigo, vencimento: L.fmtData(r.validoAte), criado: r.novo, versao: VERSAO });
         }
         const meses = Math.round(Number(b.meses));
         if (!(meses >= 1 && meses <= 36)) return L.resp(400, { erro: "Meses deve ser de 1 a 36." });
