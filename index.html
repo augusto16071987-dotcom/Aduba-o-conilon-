@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v164-pedidos-teste";
+const APP_VERSION = "build-2026-11-15-v165-carencia-na-compra";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -2760,6 +2760,8 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
     const [talhoesSelecionados, setTalhoesSelecionados] = useState(() => (talhoes || []).map((t) => t.id));
     const toggleTalhaoSelecionado = (id) => setTalhoesSelecionados((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
     const valido = data && produto.trim() && dose && (!aplicarVarios || talhoesSelecionados.length > 0);
+    const carenciaCompra = carenciaDoProduto(produto, compras);
+    const carenciaFinal = carenciaCompra != null ? carenciaCompra : (carencia !== "" ? Number(carencia) : null);
     const doseEhPorArea = unidade === "L/ha" || unidade === "kg/ha";
     const infoPreco = produto && doseEhPorArea ? precoUnitarioDoProduto(produto, compras || []) : null;
     const baseTipoCompra = infoPreco ? (["L", "galoes"].includes(infoPreco.unidadeCompra) ? "L" : ["kg", "sacos"].includes(infoPreco.unidadeCompra) ? "kg" : null) : null;
@@ -2820,8 +2822,9 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
             }),
             custoPorUnidade == null && dose && (precoIncompativel ? (React.createElement("p", { className: "text-[11px] text-[#a8442f] mt-2" },
                 `Esse produto foi comprado em ${infoPreco.unidadeCompra} \u2014 escolha ${baseTipoDose === "L" ? "kg/ha" : "L/ha"} pra calcular o custo.`)) : (React.createElement("p", { className: "text-[11px] text-stone-400 mt-2" }, "Sem compra registrada para esse produto \u2014 cadastre em \"Financeiro\" pra ver o custo calculado por talh\u00E3o."))))),
-        React.createElement(Field, { label: "Per\u00EDodo de car\u00EAncia (dias, opcional)" },
-            React.createElement(NumInput, { placeholder: "Ex: 15", value: carencia, onChange: (e) => setCarencia(e.target.value) })),
+        produto && (carenciaDoProduto(produto, compras) != null
+            ? React.createElement("p", { className: "text-xs text-[#a8442f] mb-3 -mt-1" }, "\u23F3 Car\u00EAncia deste produto: " + carenciaDoProduto(produto, compras) + " dias (vem da compra)")
+            : React.createElement("p", { className: "text-xs text-stone-400 mb-3 -mt-1" }, "Sem car\u00EAncia cadastrada na compra deste produto. Edite a compra pra informar.")),
         React.createElement(Field, { label: "Observa\u00E7\u00F5es" },
             React.createElement("textarea", { className: inputCls, rows: 2, placeholder: "Alguma anota\u00E7\u00E3o extra (opcional)", value: obs, onChange: (e) => setObs(e.target.value) })),
         React.createElement(PrimaryBtn, { disabled: !valido, onClick: () => {
@@ -2834,7 +2837,7 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
                             const custoTalhao = custoPorUnidade != null ? Math.round((dosePorHa * areaT * custoPorUnidade) * 100) / 100 : null;
                             return { talhaoId: t.id, dados: {
                                 id: uid(), data, produto: produto.trim(), formulacao: formulacao.trim(), alvo,
-                                dose: dosePorHa, unidade, carencia: carencia !== "" ? Number(carencia) : null, custo: custoTalhao, obs: obs.trim(),
+                                dose: dosePorHa, unidade, carencia: carenciaFinal, custo: custoTalhao, obs: obs.trim(),
                             } };
                         });
                     onSave({ multiplos: true, registros });
@@ -2843,7 +2846,7 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
                 const custoFinal = custoPorUnidade != null && talhao ? Math.round((Number(dose) * (Number(talhao.area) || 0) * custoPorUnidade) * 100) / 100 : null;
                 onSave({
                     id: initial ? initial.id : uid(), data, produto: produto.trim(), formulacao: formulacao.trim(), alvo,
-                    dose: Number(dose), unidade, carencia: carencia !== "" ? Number(carencia) : null, custo: custoFinal, obs: obs.trim(),
+                    dose: Number(dose), unidade, carencia: carenciaFinal, custo: custoFinal, obs: obs.trim(),
                 });
             } },
             React.createElement(Icon, { name: "check", size: 18 }),
@@ -3105,8 +3108,9 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
                             React.createElement("option", { value: "L" }, "litros"),
                             React.createElement("option", { value: "g" }, "gramas"),
                             React.createElement("option", { value: "kg" }, "kg")))),
-                React.createElement(Field, { label: "Per\u00EDodo de car\u00EAncia (dias, opcional)" },
-                    React.createElement(NumInput, { placeholder: "Ex: 30", value: l.carencia || "", onChange: (e) => atualizarProdutoHerbicida(i, "carencia", e.target.value) })),
+                l.produto && (carenciaDoProduto(l.produto, compras) != null
+                    ? React.createElement("p", { className: "text-xs text-[#a8442f] mb-2 -mt-1" }, "\u23F3 Car\u00EAncia deste produto: " + carenciaDoProduto(l.produto, compras) + " dias (vem da compra)")
+                    : React.createElement("p", { className: "text-xs text-stone-400 mb-2 -mt-1" }, "Sem car\u00EAncia cadastrada na compra deste produto. Edite a compra pra informar.")),
                 l.quantidadeProdutoTotal != null && (React.createElement("p", { className: "text-xs text-stone-500 -mt-1 mb-1" },
                     "= ", fmtBR(l.quantidadeProdutoTotal, 0), " ", l.unidadeProduto, " no total")),
                 l.produto && !l.infoPreco && (React.createElement("p", { className: "text-xs text-[#a8442f]" },
@@ -3150,7 +3154,7 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
                                     numBombadas: Number(numBombadas), capacidadeBomba: Number(capacidadeBomba),
                                     doseBombada: Number(l.doseBombada), quantidadeProduto: l.quantidadeProdutoTotal,
                                     unidadeProduto: l.unidadeProduto,
-                                    carencia: l.carencia !== "" && l.carencia != null ? Number(l.carencia) : null,
+                                    carencia: carenciaDoProduto(l.produto, compras) != null ? carenciaDoProduto(l.produto, compras) : (l.carencia !== "" && l.carencia != null ? Number(l.carencia) : null),
                                     replicadoQtdTalhoes: talhoesAlvo.length > 1 ? talhoesAlvo.length : null,
                                     obs: obs.trim(),
                                 },
@@ -3166,7 +3170,7 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
                     doseBombada: linhasHerbicida[0].doseBombada ? Number(linhasHerbicida[0].doseBombada) : null,
                     quantidadeProduto: linhasHerbicida[0].quantidadeProdutoTotal,
                     unidadeProduto: linhasHerbicida[0].unidadeProduto,
-                    carencia: linhasHerbicida[0].carencia !== "" && linhasHerbicida[0].carencia != null ? Number(linhasHerbicida[0].carencia) : null,
+                    carencia: carenciaDoProduto(linhasHerbicida[0].produto, compras) != null ? carenciaDoProduto(linhasHerbicida[0].produto, compras) : (linhasHerbicida[0].carencia !== "" && linhasHerbicida[0].carencia != null ? Number(linhasHerbicida[0].carencia) : null),
                 } : {};
                 const total = isServicoDiaria ? Number(valorTotalCalculado.toFixed(2)) : isHerbicida ? Number(custoHerbicidaCalculado.toFixed(2)) : Number(valorTotal);
                 const descricaoFinal = isHerbicida ? (linhasHerbicida[0] ? linhasHerbicida[0].produto : "") : descricao.trim();
@@ -3212,6 +3216,7 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
     const [unidade, setUnidade] = useState(initial ? initial.unidade || "" : "sacos");
     const [precoUnitario, setPrecoUnitario] = useState(initial && initial.quantidade ? String((Number(initial.valorTotal) / Number(initial.quantidade)).toFixed(2)) : "");
     const [pesoSaco, setPesoSaco] = useState(initial && initial.pesoSaco != null ? String(initial.pesoSaco) : "50");
+    const [carencia, setCarencia] = useState(initial && initial.carencia != null ? String(initial.carencia) : "");
     const [obs, setObs] = useState(initial ? initial.obs || "" : "");
     const [fotoBase64, setFotoBase64] = useState(initial ? initial.fotoBase64 || null : null);
     const [fotoMudou, setFotoMudou] = useState(false);
@@ -3304,7 +3309,8 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
             setter(comp && comp[nu.key] != null ? String(comp[nu.key]) : "");
         });
     };
-    const valido = data && produto.trim() && quantidade && precoUnitario;
+    const ehDefensivo = categoria === "Defensivo" || categoria === "Herbicida";
+    const valido = data && produto.trim() && quantidade && precoUnitario && (!ehDefensivo || carencia !== "");
     const valorTotalCalculado = quantidade && precoUnitario ? Number(quantidade) * Number(precoUnitario) : null;
     const tipoBusca = (categoria === "Defensivo" || categoria === "Herbicida") ? "defensivo" : categoria === "Adubo" ? "fertilizante" : "todos";
     const mostrarNutrientes = categoria === "Adubo" || categoria === "Outro";
@@ -3363,6 +3369,9 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
                     React.createElement("option", { value: "L" }, "litros"),
                     React.createElement("option", { value: "galoes" }, "gal\u00E3o/bombona"),
                     React.createElement("option", { value: "un" }, "unidade(s)")))),
+        ehDefensivo && (React.createElement(Field, { label: "Per\u00EDodo de car\u00EAncia (dias) *" },
+            React.createElement(NumInput, { placeholder: "Ex: 30 (veja na bula; 0 se n\u00E3o tem)", value: carencia, onChange: (e) => setCarencia(e.target.value) }),
+            React.createElement("p", { className: "text-xs text-stone-400 mt-1" }, "Obrigat\u00F3rio. O app usa esse prazo em todas as aplica\u00E7\u00F5es deste produto e mostra a contagem no Calend\u00E1rio."))),
         unidade === "sacos" && (React.createElement(Field, { label: "Peso de cada saco (kg)" },
             React.createElement(NumInput, { placeholder: "Ex: 25 ou 50", value: pesoSaco, onChange: (e) => setPesoSaco(e.target.value) }))),
         unidade === "galoes" && (React.createElement(Field, { label: "Litros de cada gal\u00E3o" },
@@ -3473,7 +3482,7 @@ function CompraForm({ onSave, onClose, initial, talhoes }) {
                 const compraObj = {
                     id: compraId, data, categoria, produto: produto.trim(), formulacao: formulacao.trim(),
                     quantidade: Number(quantidade), unidade, pesoSaco: (unidade === "sacos" || unidade === "galoes") ? Number(pesoSaco) : null, valorTotal: total, obs: obs.trim(),
-                    mostrarEstoque, fotoBase64: null, temFoto: fotoMeta.temFoto, fotoPartes: fotoMeta.fotoPartes,
+                    mostrarEstoque, carencia: ehDefensivo && carencia !== "" ? Number(carencia) : null, fotoBase64: null, temFoto: fotoMeta.temFoto, fotoPartes: fotoMeta.fotoPartes,
                     bulaNome: bulaMeta.bulaNome || null, bulaPartes: bulaMeta.bulaPartes || 0, bulaTamanho: bulaMeta.bulaTamanho || 0,
                     ...nutrientesSalvos,
                 };
@@ -3608,6 +3617,15 @@ function paraUnidadeBase(quantidade, unidade, pesoSaco) {
     if (unidade === "galoes")
         return q * (Number(pesoSaco) || 20); // pesoSaco guarda os litros do galão
     return q; // kg, L, mL/L, g/L etc já tratados como base ou não convertíveis
+}
+/* Carência (dias) do produto: vem da compra mais recente que tenha esse dado. */
+function carenciaDoProduto(nomeProduto, compras) {
+    if (!nomeProduto || !compras) return null;
+    const alvo = String(nomeProduto).trim().toLowerCase();
+    const c = compras
+        .filter((x) => x.produto && x.produto.trim().toLowerCase() === alvo && x.carencia != null && x.carencia !== "")
+        .sort((a, b) => (a.data < b.data ? 1 : -1))[0];
+    return c ? Number(c.carencia) : null;
 }
 function precoUnitarioDoProduto(nomeProduto, compras) {
     if (!nomeProduto || !compras || compras.length === 0)
@@ -5162,8 +5180,8 @@ function CalendarioScreen({ talhoes, adubacoes, defensivos, despesas, agendament
             const nome = t ? t.nome : "Talh\u00E3o";
             if (grupos[chave].talhoes.indexOf(nome) < 0) grupos[chave].talhoes.push(nome);
         };
-        Object.keys(defensivos || {}).forEach((tid) => (defensivos[tid] || []).forEach((x) => add(tid, x.produto, "defensivo", x.data, x.carencia)));
-        Object.keys(despesas || {}).forEach((tid) => (despesas[tid] || []).forEach((x) => { if (x.categoria === "Herbicida") add(tid, x.descricao, "herbicida", x.data, x.carencia); }));
+        Object.keys(defensivos || {}).forEach((tid) => (defensivos[tid] || []).forEach((x) => add(tid, x.produto, "defensivo", x.data, x.carencia != null ? x.carencia : carenciaDoProduto(x.produto, compras))));
+        Object.keys(despesas || {}).forEach((tid) => (despesas[tid] || []).forEach((x) => { if (x.categoria === "Herbicida") add(tid, x.descricao, "herbicida", x.data, x.carencia != null ? x.carencia : carenciaDoProduto(x.descricao, compras)); }));
         return Object.values(grupos).sort((x, y) => x.faltam - y.faltam);
     })();
     const mmHojeChuva = chuvaPorDia[hojeISO] || 0;
@@ -6055,7 +6073,7 @@ function TelaAjuda({ onBack, onAbrirNovoTalhao, onAbrirFinanceiro, onAbrirCalcul
         ] },
         { id: "calendario", titulo: "Calend\u00E1rio, agendamentos e avisos", itens: [
             ["Chuva e pluvi\u00f4metro", "Os dias com chuva ganham um n\u00famero azul (mm) no calend\u00e1rio. Pra lan\u00e7ar chuva, ver os totais ou conectar o pluvi\u00f4metro, v\u00e1 em In\u00edcio > aba Tempo > cart\u00e3o Chuva."],
-            ["Car\u00eancia", "Ao registrar uma aplica\u00e7\u00e3o de defensivo (fungicida, inseticida) ou de herbicida, voc\u00ea pode informar o per\u00edodo de car\u00eancia em dias \u2014 \u00e9 opcional. Se preencher, o Calend\u00e1rio mostra uma barra de progresso pra cada produto: ela come\u00e7a cheia e vermelha e vai diminuindo e ficando verde conforme os dias passam, at\u00e9 sumir quando a car\u00eancia acaba. Se voc\u00ea aplicou mais de um produto, cada um aparece com a sua barra, j\u00e1 que a car\u00eancia muda de produto pra produto. Sem car\u00eancia preenchida, n\u00e3o aparece nada."],
+            ["Car\u00eancia", "O per\u00edodo de car\u00eancia (em dias) \u00e9 informado na COMPRA do defensivo ou herbicida \u2014 \u00e9 obrigat\u00f3rio (digite 0 se o produto n\u00e3o tem). Ao registrar a aplica\u00e7\u00e3o, o app usa a car\u00eancia da compra automaticamente. O Calend\u00e1rio mostra uma barra de progresso pra cada produto: ela come\u00e7a cheia e vermelha e vai diminuindo e ficando verde conforme os dias passam, at\u00e9 sumir quando a car\u00eancia acaba. Se voc\u00ea aplicou mais de um produto, cada um aparece com a sua barra, j\u00e1 que a car\u00eancia muda de produto pra produto. Se uma compra antiga n\u00e3o tem car\u00eancia, abra ela em Editar e preencha \u2014 as aplica\u00e7\u00f5es desse produto passam a mostrar a contagem."],
             ["\u00CDcones", "Saco de adubo =aduba\u00E7\u00E3o, gota = irriga\u00E7\u00E3o, bichinho = defensivo. A cor da bolinha diz o estado: azul (agendado, data no futuro), vermelho (atrasado \u2014 a data j\u00E1 passou e ningu\u00E9m marcou como conclu\u00EDdo), verde ou laranja (j\u00E1 feito)."],
             ["Agendar", "Abra o {{Calend\u00E1rio|calendario}}, toque em \"Agendar aplica\u00E7\u00E3o\" e escolha a data, o talh\u00E3o (ou todos de uma vez, se for a mesma aplica\u00E7\u00E3o em v\u00E1rios), a forma (via solo, foliar, fertirriga\u00E7\u00E3o, irriga\u00E7\u00E3o ou outro) e o produto do estoque. \u00C9 s\u00F3 um lembrete pra n\u00E3o esquecer \u2014 n\u00E3o lan\u00E7a custo nem desconta estoque nesse momento."],
             ["Agendar v\u00E1rias datas de uma vez", "No formul\u00E1rio de agendamento, toque em \"+ Adicionar outra data\" pra empilhar v\u00E1rias datas de uma s\u00F3 vez \u2014 \u00FAtil pra fertirriga\u00E7\u00E3o semanal, por exemplo. O app cria um agendamento separado pra cada combina\u00E7\u00E3o de data, talh\u00E3o e produto, e o bot\u00E3o final mostra quantos vai criar."],
