@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v166-defensivo-por-bombada";
+const APP_VERSION = "build-2026-11-15-v167-calda-varios-produtos";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -2760,6 +2760,11 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
     const [capacidadeBomba, setCapacidadeBomba] = useState(initial && initial.capacidadeBomba != null ? String(initial.capacidadeBomba) : "20");
     const [doseBombada, setDoseBombada] = useState(initial && initial.doseBombada != null ? String(initial.doseBombada) : "");
     const [unidadeBomba, setUnidadeBomba] = useState(initial && initial.unidadeProduto ? initial.unidadeProduto : "mL");
+    // outros produtos misturados na mesma calda (s\u00F3 no modo por bombada)
+    const [extras, setExtras] = useState([]);
+    const addExtra = () => setExtras((prev) => [...prev, { produto: "", doseBombada: "", unidade: "mL" }]);
+    const updExtra = (i, campo, v) => setExtras((prev) => prev.map((x, idx) => idx === i ? { ...x, [campo]: v } : x));
+    const delExtra = (i) => setExtras((prev) => prev.filter((_, idx) => idx !== i));
     const [carencia, setCarencia] = useState(initial && initial.carencia != null ? String(initial.carencia) : "");
     const [obs, setObs] = useState(initial ? initial.obs || "" : "");
     const [aplicarVarios, setAplicarVarios] = useState(false);
@@ -2773,7 +2778,19 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
     const doseBombaHa = areaAlvo > 0 ? Math.round((totalBombaBase / areaAlvo) * 1e6) / 1e6 : 0;
     const dose = modo === "bomba" ? (totalBombaBase > 0 && doseBombaHa > 0 ? String(doseBombaHa) : "") : doseHa;
     const unidade = modo === "bomba" ? unidadeBombaHa : unidadeHa;
-    const valido = data && produto.trim() && dose && (!aplicarVarios || talhoesSelecionados.length > 0);
+    const podeExtras = !initial && modo === "bomba" && talhoes && talhoes.length > 0;
+    const extrasAtivos = podeExtras ? extras : [];
+    const extrasOk = extrasAtivos.every((x) => x.produto.trim() && Number(x.doseBombada) > 0);
+    const calcLinha = (prod, doseB, unB) => {
+        const base = (Number(numBombadas) || 0) * (Number(doseB) || 0) / ((unB === "mL" || unB === "g") ? 1000 : 1);
+        const un = (unB === "mL" || unB === "L") ? "L/ha" : "kg/ha";
+        const doseHaX = areaAlvo > 0 ? Math.round((base / areaAlvo) * 1e6) / 1e6 : 0;
+        const info = prod ? precoUnitarioDoProduto(prod, compras || []) : null;
+        const tipoC = info ? (["L", "galoes"].includes(info.unidadeCompra) ? "L" : ["kg", "sacos"].includes(info.unidadeCompra) ? "kg" : null) : null;
+        const preco = info && tipoC === (un === "L/ha" ? "L" : "kg") ? info.precoPorBase : null;
+        return { base, un, doseHa: doseHaX, preco };
+    };
+    const valido = data && produto.trim() && dose && extrasOk && (!aplicarVarios || talhoesSelecionados.length > 0);
     const carenciaCompra = carenciaDoProduto(produto, compras);
     const carenciaFinal = carenciaCompra != null ? carenciaCompra : (carencia !== "" ? Number(carencia) : null);
     const doseEhPorArea = unidade === "L/ha" || unidade === "kg/ha";
@@ -2789,7 +2806,7 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
             React.createElement("input", { type: "checkbox", checked: aplicarVarios, onChange: (e) => { setAplicarVarios(e.target.checked); if (e.target.checked && unidade !== "L/ha" && unidade !== "kg/ha") setUnidade("L/ha"); }, className: "w-4 h-4 accent-[#33422e]" }),
             `Aplicar nos ${talhoes.length} talh\u00F5es de uma vez (dose por hectare, ajustada pro tamanho de cada um)`)),
         React.createElement(Field, { label: "Produto (defensivo, do estoque)" },
-            React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: "Defensivo", value: produto, onChange: setProduto, onProdutoSelecionado: (c) => setFormulacao(c.formulacao || "") })),
+            React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: ["todos"], value: produto, onChange: setProduto, onProdutoSelecionado: (c) => setFormulacao(c.formulacao || "") })),
         React.createElement(Field, { label: "Alvo (praga/doen\u00E7a controlada)" },
             React.createElement("select", { className: inputCls, value: alvo, onChange: (e) => setAlvo(e.target.value) }, PRAGAS_COMUNS.map((p) => React.createElement("option", { key: p, value: p }, p)))),
         React.createElement(Field, { label: "Como registrar a dose?" },
@@ -2811,6 +2828,30 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
                         React.createElement("option", { value: "g" }, "gramas"),
                         React.createElement("option", { value: "kg" }, "kg")))),
             totalBombaBase > 0 && React.createElement("p", { className: "text-xs text-stone-500 -mt-2 mb-3" }, "= " + fmtBR(Number(numBombadas) * Number(doseBombada), 0) + " " + unidadeBomba + " de produto no total" + (areaAlvo > 0 ? " (" + fmtBR(doseBombaHa, 2) + " " + unidadeBombaHa + ")" : "")))),
+        podeExtras && extras.map((x, i) => {
+            const cl = calcLinha(x.produto, x.doseBombada, x.unidade);
+            const car = carenciaDoProduto(x.produto, compras);
+            return React.createElement("div", { key: i, className: "bg-[#f7f2e8] border border-stone-200 rounded-xl p-3 mb-3" },
+                React.createElement("div", { className: "flex items-center justify-between mb-1" },
+                    React.createElement("span", { className: "text-sm font-semibold text-stone-700" }, "Produto " + (i + 2) + " da calda"),
+                    React.createElement("button", { type: "button", onClick: () => delExtra(i), className: "text-xs font-semibold text-[#a8442f] underline" }, "Remover")),
+                React.createElement(Field, { label: "Produto (do estoque)" },
+                    React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: ["todos"], value: x.produto, onChange: (v) => updExtra(i, "produto", v) })),
+                React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+                    React.createElement(Field, { label: "Dose por bombada" },
+                        React.createElement(NumInput, { placeholder: "Ex: 50", value: x.doseBombada, onChange: (e) => updExtra(i, "doseBombada", e.target.value) })),
+                    React.createElement(Field, { label: "Unidade" },
+                        React.createElement("select", { className: inputCls, value: x.unidade, onChange: (e) => updExtra(i, "unidade", e.target.value) },
+                            React.createElement("option", { value: "mL" }, "mL"),
+                            React.createElement("option", { value: "L" }, "litros"),
+                            React.createElement("option", { value: "g" }, "gramas"),
+                            React.createElement("option", { value: "kg" }, "kg")))),
+                cl.base > 0 && React.createElement("p", { className: "text-xs text-stone-500" }, "= " + fmtBR(Number(numBombadas) * Number(x.doseBombada), 0) + " " + x.unidade + " no total" + (cl.preco != null && areaAlvo > 0 ? " \u00B7 custo R$ " + fmtBR(cl.base * cl.preco, 2) : "")),
+                x.produto && (car != null
+                    ? React.createElement("p", { className: "text-xs text-[#a8442f] mt-1" }, "\u23F3 Car\u00EAncia: " + car + " dias (vem da compra)")
+                    : React.createElement("p", { className: "text-xs text-stone-400 mt-1" }, "Sem car\u00EAncia cadastrada na compra deste produto.")));
+        }),
+        modo === "bomba" && !initial && talhoes && talhoes.length > 0 && React.createElement("button", { type: "button", onClick: addExtra, className: "w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#c9a66b] text-[#8a6d3b] font-semibold rounded-lg py-2.5 text-sm mb-3" }, "+ Adicionar outro produto na mesma calda"),
         modo === "ha" && (        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
             React.createElement(Field, { label: aplicarVarios ? "Dose (por hectare)" : "Dose" },
                 React.createElement(NumInput, { placeholder: "Ex: 1.5", value: dose, onChange: (e) => setDose(e.target.value) })),
@@ -2861,6 +2902,29 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
         React.createElement(Field, { label: "Observa\u00E7\u00F5es" },
             React.createElement("textarea", { className: inputCls, rows: 2, placeholder: "Alguma anota\u00E7\u00E3o extra (opcional)", value: obs, onChange: (e) => setObs(e.target.value) })),
         React.createElement(PrimaryBtn, { disabled: !valido, onClick: () => {
+                if (modo === "bomba" && extrasAtivos.length > 0) {
+                    const linhas = [{ produto: produto.trim(), doseBombada, unidade: unidadeBomba, formulacao: formulacao.trim() }]
+                        .concat(extrasAtivos.map((x) => {
+                            const c = (compras || []).filter((k) => k.produto && k.produto.trim().toLowerCase() === x.produto.trim().toLowerCase()).sort((a, b) => (a.data < b.data ? 1 : -1))[0];
+                            return { produto: x.produto.trim(), doseBombada: x.doseBombada, unidade: x.unidade, formulacao: (c && c.formulacao) || "" };
+                        }));
+                    const alvos = aplicarVarios ? (talhoes || []).filter((t) => talhoesSelecionados.includes(t.id)) : [talhao];
+                    const registros = [];
+                    alvos.forEach((t) => {
+                        const areaT = Number(t.area) || 0;
+                        linhas.forEach((l) => {
+                            const cl = calcLinha(l.produto, l.doseBombada, l.unidade);
+                            registros.push({ talhaoId: t.id, dados: {
+                                id: uid(), data, produto: l.produto, formulacao: l.formulacao, alvo,
+                                dose: cl.doseHa, unidade: cl.un, carencia: carenciaDoProduto(l.produto, compras),
+                                custo: cl.preco != null ? Math.round(cl.doseHa * areaT * cl.preco * 100) / 100 : null, obs: obs.trim(),
+                                ...(aplicarVarios ? {} : { numBombadas: Number(numBombadas), capacidadeBomba: Number(capacidadeBomba) || null, doseBombada: Number(l.doseBombada), unidadeProduto: l.unidade }),
+                            } });
+                        });
+                    });
+                    onSave({ multiplos: true, registros });
+                    return;
+                }
                 if (aplicarVarios) {
                     const dosePorHa = Number(dose) || 0;
                     const registros = (talhoes || [])
@@ -3132,7 +3196,7 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
                     React.createElement("span", { className: "text-xs font-semibold text-stone-500" }, "Produto ", i + 1),
                     React.createElement("button", { type: "button", onClick: () => removerProdutoHerbicida(i), className: "text-xs text-[#a8442f] font-semibold" }, "Remover"))),
                 React.createElement(Field, { label: "Produto (herbicida, do estoque)" },
-                    React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: "Herbicida", value: l.produto, onChange: (v) => atualizarProdutoHerbicida(i, "produto", v) })),
+                    React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: ["todos"], value: l.produto, onChange: (v) => atualizarProdutoHerbicida(i, "produto", v) })),
                 React.createElement("div", { className: "grid grid-cols-2 gap-3" },
                     React.createElement(Field, { label: "Dose por bombada" },
                         React.createElement(NumInput, { placeholder: "Ex: 10", value: l.doseBombada, onChange: (e) => atualizarProdutoHerbicida(i, "doseBombada", e.target.value) })),
