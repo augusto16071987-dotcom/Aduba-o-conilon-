@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v165-carencia-na-compra";
+const APP_VERSION = "build-2026-11-15-v166-defensivo-por-bombada";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -2752,13 +2752,27 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
         if (f) setFormulacao(f);
     }, []);
     const [alvo, setAlvo] = useState(initial ? initial.alvo : PRAGAS_COMUNS[0]);
-    const [dose, setDose] = useState(initial ? String(initial.dose) : "");
-    const [unidade, setUnidade] = useState(initial ? initial.unidade : "L/ha");
+    const [doseHa, setDose] = useState(initial ? String(initial.dose) : "");
+    const [unidadeHa, setUnidade] = useState(initial ? initial.unidade : "L/ha");
+    // modo de registro: dose por hectare ou por bombada (como no herbicida)
+    const [modo, setModo] = useState(initial && initial.numBombadas ? "bomba" : "ha");
+    const [numBombadas, setNumBombadas] = useState(initial && initial.numBombadas != null ? String(initial.numBombadas) : "");
+    const [capacidadeBomba, setCapacidadeBomba] = useState(initial && initial.capacidadeBomba != null ? String(initial.capacidadeBomba) : "20");
+    const [doseBombada, setDoseBombada] = useState(initial && initial.doseBombada != null ? String(initial.doseBombada) : "");
+    const [unidadeBomba, setUnidadeBomba] = useState(initial && initial.unidadeProduto ? initial.unidadeProduto : "mL");
     const [carencia, setCarencia] = useState(initial && initial.carencia != null ? String(initial.carencia) : "");
     const [obs, setObs] = useState(initial ? initial.obs || "" : "");
     const [aplicarVarios, setAplicarVarios] = useState(false);
     const [talhoesSelecionados, setTalhoesSelecionados] = useState(() => (talhoes || []).map((t) => t.id));
     const toggleTalhaoSelecionado = (id) => setTalhoesSelecionados((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    // Por bombada: total de produto = bombadas x dose; vira dose por hectare
+    // (L/ha ou kg/ha) pra estoque, custo e calend\u00E1rio funcionarem igual.
+    const areaAlvo = aplicarVarios ? (talhoes || []).filter((t) => talhoesSelecionados.includes(t.id)).reduce((a, t) => a + (Number(t.area) || 0), 0) : (talhao ? Number(talhao.area) || 0 : 0);
+    const totalBombaBase = (Number(numBombadas) || 0) * (Number(doseBombada) || 0) / ((unidadeBomba === "mL" || unidadeBomba === "g") ? 1000 : 1);
+    const unidadeBombaHa = (unidadeBomba === "mL" || unidadeBomba === "L") ? "L/ha" : "kg/ha";
+    const doseBombaHa = areaAlvo > 0 ? Math.round((totalBombaBase / areaAlvo) * 1e6) / 1e6 : 0;
+    const dose = modo === "bomba" ? (totalBombaBase > 0 && doseBombaHa > 0 ? String(doseBombaHa) : "") : doseHa;
+    const unidade = modo === "bomba" ? unidadeBombaHa : unidadeHa;
     const valido = data && produto.trim() && dose && (!aplicarVarios || talhoesSelecionados.length > 0);
     const carenciaCompra = carenciaDoProduto(produto, compras);
     const carenciaFinal = carenciaCompra != null ? carenciaCompra : (carencia !== "" ? Number(carencia) : null);
@@ -2778,7 +2792,26 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
             React.createElement(SeletorProdutoEstoque, { compras: compras || [], categoria: "Defensivo", value: produto, onChange: setProduto, onProdutoSelecionado: (c) => setFormulacao(c.formulacao || "") })),
         React.createElement(Field, { label: "Alvo (praga/doen\u00E7a controlada)" },
             React.createElement("select", { className: inputCls, value: alvo, onChange: (e) => setAlvo(e.target.value) }, PRAGAS_COMUNS.map((p) => React.createElement("option", { key: p, value: p }, p)))),
-        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+        React.createElement(Field, { label: "Como registrar a dose?" },
+            React.createElement(ChoiceRow, { options: [["ha", "Por hectare"], ["bomba", "Por bombada"]], value: modo, onChange: setModo })),
+        modo === "bomba" && (React.createElement(React.Fragment, null,
+            React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+                React.createElement(Field, { label: aplicarVarios ? "N\u00FAmero de bombadas (total)" : "N\u00FAmero de bombadas" },
+                    React.createElement(NumInput, { placeholder: "Ex: 3", value: numBombadas, onChange: (e) => setNumBombadas(e.target.value) })),
+                React.createElement(Field, { label: "Capacidade da bomba (L)" },
+                    React.createElement(NumInput, { placeholder: "Ex: 20", value: capacidadeBomba, onChange: (e) => setCapacidadeBomba(e.target.value) }))),
+            Number(numBombadas) > 0 && Number(capacidadeBomba) > 0 && React.createElement("p", { className: "text-xs text-stone-500 -mt-2 mb-3" }, "= " + fmtBR(Number(numBombadas) * Number(capacidadeBomba), 0) + " L de calda pulverizada"),
+            React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+                React.createElement(Field, { label: "Dose por bombada" },
+                    React.createElement(NumInput, { placeholder: "Ex: 50", value: doseBombada, onChange: (e) => setDoseBombada(e.target.value) })),
+                React.createElement(Field, { label: "Unidade" },
+                    React.createElement("select", { className: inputCls, value: unidadeBomba, onChange: (e) => setUnidadeBomba(e.target.value) },
+                        React.createElement("option", { value: "mL" }, "mL"),
+                        React.createElement("option", { value: "L" }, "litros"),
+                        React.createElement("option", { value: "g" }, "gramas"),
+                        React.createElement("option", { value: "kg" }, "kg")))),
+            totalBombaBase > 0 && React.createElement("p", { className: "text-xs text-stone-500 -mt-2 mb-3" }, "= " + fmtBR(Number(numBombadas) * Number(doseBombada), 0) + " " + unidadeBomba + " de produto no total" + (areaAlvo > 0 ? " (" + fmtBR(doseBombaHa, 2) + " " + unidadeBombaHa + ")" : "")))),
+        modo === "ha" && (        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
             React.createElement(Field, { label: aplicarVarios ? "Dose (por hectare)" : "Dose" },
                 React.createElement(NumInput, { placeholder: "Ex: 1.5", value: dose, onChange: (e) => setDose(e.target.value) })),
             React.createElement(Field, { label: "Unidade" },
@@ -2786,7 +2819,7 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
                     React.createElement("option", { value: "L/ha" }, "L/ha"),
                     !aplicarVarios && React.createElement("option", { value: "mL/L" }, "mL/L (calda)"),
                     React.createElement("option", { value: "kg/ha" }, "kg/ha"),
-                    !aplicarVarios && React.createElement("option", { value: "g/L" }, "g/L (calda)")))),
+                    !aplicarVarios && React.createElement("option", { value: "g/L" }, "g/L (calda)"))))),
         !aplicarVarios && dose && doseEhPorArea && talhao && (React.createElement("div", { className: "bg-[#eef3e8] rounded-lg p-3 mb-3" },
             React.createElement("p", { className: "text-xs font-semibold text-stone-600 mb-1" }, "Equivale, neste talh\u00E3o (", fmtBR(Number(talhao.area) || 0, 2), " ha)"),
             React.createElement("p", { className: "text-sm text-stone-700" },
@@ -2847,6 +2880,7 @@ function DefensivoForm({ onSave, onClose, initial, prefill, compras, talhao, tal
                 onSave({
                     id: initial ? initial.id : uid(), data, produto: produto.trim(), formulacao: formulacao.trim(), alvo,
                     dose: Number(dose), unidade, carencia: carenciaFinal, custo: custoFinal, obs: obs.trim(),
+                    ...(modo === "bomba" ? { numBombadas: Number(numBombadas), capacidadeBomba: Number(capacidadeBomba) || null, doseBombada: Number(doseBombada), unidadeProduto: unidadeBomba } : {}),
                 });
             } },
             React.createElement(Icon, { name: "check", size: 18 }),
@@ -3919,6 +3953,7 @@ function PragasTab({ talhao, talhoes, ocorrencias, defensivos, compras, onAddOco
                     " \u00B7 alvo: ",
                     d.alvo),
                 d.formulacao && React.createElement("p", { className: "text-xs text-stone-400" }, d.formulacao),
+                d.numBombadas ? React.createElement("p", { className: "text-xs text-stone-500" }, fmtBR(d.numBombadas, 0) + " bombada(s)" + (d.doseBombada ? " \u00B7 " + fmtBR(d.doseBombada, 0) + " " + (d.unidadeProduto || "mL") + "/bombada" : "")) : null,
                 d.carencia != null && React.createElement("p", { className: "text-xs text-[#a8442f]" },
                     "Car\u00EAncia: ",
                     d.carencia,
