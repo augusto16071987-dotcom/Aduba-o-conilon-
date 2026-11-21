@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v167-calda-varios-produtos";
+const APP_VERSION = "build-2026-11-15-v168-herbicida-ratear";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -3131,6 +3131,7 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
     const removerProdutoHerbicida = (i) => setProdutosHerbicida((prev) => prev.filter((_, idx) => idx !== i));
     const [aplicarVarios, setAplicarVarios] = useState(false);
     const [modoVarios, setModoVarios] = useState("ratear");
+    const [modoHerb, setModoHerb] = useState("replicar");
     const [talhoesSelecionados, setTalhoesSelecionados] = useState(() => (talhoes || []).map((t) => t.id));
     const toggleTalhaoSelecionado = (id) => setTalhoesSelecionados((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
     const isServicoDiaria = categoria === "Serviço/diária";
@@ -3223,8 +3224,8 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
             custoHerbicidaCalculado != null && (React.createElement("p", { className: "text-sm font-semibold text-[#a8442f] mb-3" },
                 "Custo total desta aplica\u00E7\u00E3o: R$ ", fmtBR(custoHerbicidaCalculado, 2))))),
         aplicarVarios && (React.createElement("div", { className: "bg-[#f2ece0] rounded-lg p-3 mb-3" },
-            !isHerbicida && (React.createElement(Field, { label: "Como aplicar nos talh\u00F5es marcados" },
-                React.createElement(ChoiceRow, { options: [["replicar", "Mesmo valor em cada"], ["ratear", "Dividir o valor entre eles"]], value: modoVarios, onChange: setModoVarios }))),
+            React.createElement(Field, { label: "Como aplicar nos talh\u00F5es marcados" },
+                React.createElement(ChoiceRow, { options: [["replicar", "Mesmo valor em cada"], ["ratear", "Dividir o valor entre eles"]], value: isHerbicida ? modoHerb : modoVarios, onChange: isHerbicida ? setModoHerb : setModoVarios })),
             React.createElement("p", { className: "text-xs font-semibold text-stone-600 mb-2" }, "Registrar em quais talh\u00F5es?"),
             talhoes.map((t) => (React.createElement("label", { key: t.id, className: "flex items-center justify-between gap-2 py-1.5 text-sm text-stone-700" },
                 React.createElement("span", { className: "flex items-center gap-2" },
@@ -3232,8 +3233,8 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
                     t.nome),
                 React.createElement("span", { className: "text-xs text-stone-400" }, fmtBR(Number(t.area) || 0, 2), " ha")))),
             qtdSelecionados > 1 && valorFinal != null && (React.createElement("p", { className: "text-xs text-[#8a6d3b] mt-2" },
-                !isHerbicida && modoVarios === "ratear"
-                    ? `Dividido igualmente: R$ ${fmtBR(valorFinal / qtdSelecionados, 2)} por talh\u00E3o (R$ ${fmtBR(valorFinal, 2)} no total).`
+                (isHerbicida ? modoHerb : modoVarios) === "ratear"
+                    ? `Dividido igualmente: R$ ${fmtBR(valorFinal / qtdSelecionados, 2)} por talh\u00E3o (R$ ${fmtBR(valorFinal, 2)} no total).${isHerbicida ? " O produto tamb\u00E9m \u00E9 dividido: o estoque baixa s\u00F3 uma vez o total." : ""}`
                     : `O mesmo lan\u00E7amento (R$ ${fmtBR(valorFinal, 2)}) ser\u00E1 registrado em cada um dos ${qtdSelecionados} talh\u00F5es marcados.`)),
             qtdSelecionados === 0 && (React.createElement("p", { className: "text-xs text-[#a8442f] mt-2" }, "Marque pelo menos um talh\u00E3o.")))),
         React.createElement(Field, { label: "Observa\u00E7\u00F5es" },
@@ -3242,18 +3243,21 @@ function DespesaForm({ onSave, onClose, initial, talhoes, compras, talhaoAtualId
                 if (isHerbicida && !initial) {
                     const talhoesAlvo = aplicarVarios ? talhoes.filter((t) => talhoesSelecionados.includes(t.id)).map((t) => t.id) : [talhaoAtualId];
                     const registros = [];
+                    const nAlvo = talhoesAlvo.length;
+                    const ratearH = modoHerb === "ratear" && nAlvo > 1;
                     talhoesAlvo.forEach((tid) => {
                         linhasHerbicida.forEach((l) => {
                             registros.push({
                                 talhaoId: tid,
                                 dados: {
                                     id: uid(), data, categoria, descricao: l.produto,
-                                    valorTotal: Number(l.custo.toFixed(2)),
-                                    numBombadas: Number(numBombadas), capacidadeBomba: Number(capacidadeBomba),
-                                    doseBombada: Number(l.doseBombada), quantidadeProduto: l.quantidadeProdutoTotal,
+                                    valorTotal: Number((ratearH ? l.custo / nAlvo : l.custo).toFixed(2)),
+                                    numBombadas: ratearH ? Number((Number(numBombadas) / nAlvo).toFixed(2)) : Number(numBombadas), capacidadeBomba: Number(capacidadeBomba),
+                                    doseBombada: Number(l.doseBombada), quantidadeProduto: ratearH ? l.quantidadeProdutoTotal / nAlvo : l.quantidadeProdutoTotal,
                                     unidadeProduto: l.unidadeProduto,
                                     carencia: carenciaDoProduto(l.produto, compras) != null ? carenciaDoProduto(l.produto, compras) : (l.carencia !== "" && l.carencia != null ? Number(l.carencia) : null),
-                                    replicadoQtdTalhoes: talhoesAlvo.length > 1 ? talhoesAlvo.length : null,
+                                    replicadoQtdTalhoes: !ratearH && nAlvo > 1 ? nAlvo : null,
+                                    rateadoTotal: ratearH ? Number(l.custo.toFixed(2)) : null, rateadoQtdTalhoes: ratearH ? nAlvo : null,
                                     obs: obs.trim(),
                                 },
                             });
