@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v168-herbicida-ratear";
+const APP_VERSION = "build-2026-11-15-v169-incaper-completa";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -186,9 +186,10 @@ const COR = {
       completo (N, P2O5, K2O e micronutrientes).
    2) INCAPER-ES — PREZOTTI et al. (2007), 5ª aproximação: tabela
       clássica do Espírito Santo, com faixas de produtividade mais
-      amplas. Cobre N e K2O; a tabela de P dessa edição não pôde
-      ser confirmada com números íntegros na fonte consultada, por
-      isso essa opção não estima P nem micronutrientes.
+      amplas. Cobre N, P2O5 (por classe de P no solo e textura),
+      K2O e os micros Zn e B (tabelas 7 a 9 do capítulo de
+      calagem e adubação do Incaper, conforme Prezotti et al., 2007).
+      Cu e Mn não constam na tabela do Incaper e não são estimados.
 
    Isto é uma referência técnica de partida — sempre ajuste com
    análise foliar e orientação de um agrônomo.
@@ -235,7 +236,7 @@ const TABELAS = {
     incaper_es: {
         id: "incaper_es",
         nome: "INCAPER-ES (Prezotti et al., 2007)",
-        resumo: "Clássica do Espírito Santo — N e K₂O",
+        resumo: "Clássica do Espírito Santo — N, P₂O₅, K₂O, Zn e B",
         culturas: ["cafe_conilon"],
         fonte: "INCAPER-ES — Prezotti et al. (2007), 5ª aproximação, extrator Mehlich-1.",
         faixasProdLabel: ["20-30", "31-50", "51-70", "71-100", "101-130", "131-170", ">170"],
@@ -250,10 +251,19 @@ const TABELAS = {
             [530, 460, 390, 260],
             [600, 520, 450, 320],
         ],
-        doseP2O5: null,
+        doseP2O5: [
+            [45, 35, 0, 0],
+            [60, 45, 0, 0],
+            [75, 60, 20, 0],
+            [90, 75, 35, 0],
+            [105, 90, 50, 20],
+            [120, 105, 65, 40],
+            [140, 120, 80, 60],
+        ],
         classeProdutividade: (sc) => sc <= 30 ? 0 : sc <= 50 ? 1 : sc <= 70 ? 2 : sc <= 100 ? 3 : sc <= 130 ? 4 : sc <= 170 ? 5 : 6,
-        temP: false,
-        temMicro: false,
+        temP: true,
+        temMicro: true,
+        temCuMn: false,
     },
     boletim100_arabica: {
         id: "boletim100_arabica",
