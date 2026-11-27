@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v170-incaper-micros";
+const APP_VERSION = "build-2026-11-15-v171-ciclo-frequencia";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -543,6 +543,70 @@ function calcularAplicado(adubacoes, areaHa, numPlantas) {
 function calcularPrevisto(agendamentosDoTalhao, areaHa, numPlantas) {
     const pendentesComQtd = (agendamentosDoTalhao || []).filter((a) => !a.concluido && a.quantidade);
     return calcularAplicado(pendentesComQtd, areaHa, numPlantas);
+}
+/* ---------------------------------------------------------------
+   CICLO ANUAL DE ADUBAÇÃO — o ano de tratamento termina numa data
+   final (talhao.fimAdubacao = { "2026": "2026-12-15" }). Depois dela:
+   colheita, nova análise de solo e começa o ano seguinte. A meta da
+   recomendação é anual, então "aplicado" e "previsto" só contam o
+   ano do ciclo.
+------------------------------------------------------------------*/
+const anoDeItem = (item) => Number(String(item.data).slice(0, 4));
+const doAno = (lista, ano) => (lista || []).filter((x) => anoDeItem(x) === ano);
+function fimCicloDoTalhao(talhao, ano) {
+    return talhao && talhao.fimAdubacao ? (talhao.fimAdubacao[String(ano)] || null) : null;
+}
+function dataBRcurta(iso) {
+    if (!iso) return "";
+    const [a, m, d] = String(iso).split("-");
+    return d + "/" + m + "/" + a;
+}
+function somarDiasISO(iso, dias) {
+    const d = new Date(iso + "T12:00:00");
+    d.setDate(d.getDate() + dias);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+const FREQUENCIAS_AGENDA = [["uma", "Só uma vez"], ["sem1", "1x por semana"], ["sem2", "2x por semana"], ["mes1", "1x por mês"], ["mes2", "2x por mês"], ["mes3", "3x por mês"]];
+/* Datas das aplicações repetidas, do início até a data final (inclusive).
+   1x/semana = a cada 7 dias; 2x/semana = alterna +3 e +4 dias; 1x/mês =
+   mesmo dia de cada mês; 2x/mês = a cada 15 dias; 3x/mês = a cada 10 dias. */
+function gerarDatasRepetidas(inicioISO, fimISO, freq) {
+    if (!inicioISO) return [];
+    if (freq === "uma" || !fimISO || fimISO < inicioISO) return freq === "uma" ? [inicioISO] : [];
+    const LIM = 200;
+    const datas = [];
+    if (freq === "mes1") {
+        const [y, m, d] = inicioISO.split("-").map(Number);
+        for (let k = 0; datas.length < LIM; k++) {
+            const dt = new Date(y, m - 1 + k, 1);
+            const ultimo = new Date(dt.getFullYear(), dt.getMonth() + 1, 0).getDate();
+            const iso = dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(Math.min(d, ultimo)).padStart(2, "0");
+            if (iso > fimISO) break;
+            datas.push(iso);
+        }
+        return datas;
+    }
+    const passos = freq === "sem1" ? [7] : freq === "sem2" ? [3, 4] : freq === "mes2" ? [15] : [10];
+    let atual = inicioISO, i = 0;
+    while (atual <= fimISO && datas.length < LIM) { datas.push(atual); atual = somarDiasISO(atual, passos[i % passos.length]); i++; }
+    return datas;
+}
+/* Quanto ainda falta de cada nutriente (kg, no talhão todo) pra fechar a
+   meta do ano: meta - já aplicado - já agendado (com quantidade). */
+function faltaDoCiclo(talhao, analisesDoTalhao, adubacoesDoTalhao, agendamentosDoTalhao, tabelas, ano) {
+    const ultima = [...(analisesDoTalhao || [])].sort((a, b) => (a.data < b.data ? 1 : -1))[0];
+    if (!ultima) return { ok: false, motivo: "sem_analise" };
+    const r = calcularRecomendacao(talhao, ultima, tabelas);
+    if (!r || r.erroExtrator || !r.total) return { ok: false, motivo: "sem_recomendacao" };
+    const area = Number(talhao.area) || 0, plantas = Number(talhao.numPlantas) || 0;
+    const aplicado = calcularAplicado(doAno(adubacoesDoTalhao, ano), area, plantas);
+    const previsto = calcularPrevisto(doAno(agendamentosDoTalhao, ano), area, plantas);
+    const falta = {}, meta = {};
+    ["n", "p2o5", "k2o", "s", "zn", "cu", "mn", "b"].forEach((k) => {
+        meta[k] = Number(r.total[k]) || 0;
+        falta[k] = Math.max(0, meta[k] - (aplicado[k] || 0) - (previsto[k] || 0));
+    });
+    return { ok: true, falta, meta, area };
 }
 /* ---------------------------------------------------------------
    BASE LOCAL DE PRODUTOS — adubos e defensivos mais comuns no
@@ -3913,8 +3977,9 @@ function CartaoRecomendacao({ talhao, talhoes, analise, adubacoes, agendamentos,
             React.createElement("span", null,
                 "A tabela ", r.tabela.nome, " precisa de um laudo pelo m\u00E9todo ", nomeExtrator(r.extratorEsperado), ", mas a \u00FAltima an\u00E1lise cadastrada foi marcada como ", nomeExtrator(r.extratorInformado), ". Edite a an\u00E1lise de solo e ajuste o campo \"M\u00E9todo do laborat\u00F3rio\", ou cadastre uma nova an\u00E1lise com o m\u00E9todo certo.")));
     }
-    const aplicado = calcularAplicado(adubacoes, talhao.area, Number(talhao.numPlantas) || 0);
-    const previsto = calcularPrevisto(agendamentos, talhao.area, Number(talhao.numPlantas) || 0);
+    const anoCiclo = new Date().getFullYear();
+    const aplicado = calcularAplicado(doAno(adubacoes, anoCiclo), talhao.area, Number(talhao.numPlantas) || 0);
+    const previsto = calcularPrevisto(doAno(agendamentos, anoCiclo), talhao.area, Number(talhao.numPlantas) || 0);
     const linhaMicro = (label, valorAnalise, porHa, total) => (porHa === 0 && valorAnalise != null) ? (React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100 last:border-0" },
         React.createElement("span", { className: "text-stone-600 text-sm" }, label),
         React.createElement("span", { className: "text-right" },
@@ -4045,9 +4110,49 @@ function PragasTab({ talhao, talhoes, ocorrencias, defensivos, compras, onAddOco
             } })),
         editDefensivo && (React.createElement(DefensivoForm, { compras: compras, talhao: talhao, initial: editDefensivo, onClose: () => setEditDefensivo(null), onSave: (d) => { onUpdateDefensivo(d); setEditDefensivo(null); } }))));
 }
+/* ---- Data final da adubação do ano (fecha o ciclo) ---- */
+function FimCicloModal({ talhao, talhoes, ano, onClose, onSalvar }) {
+    const atual = fimCicloDoTalhao(talhao, ano);
+    const [data, setData] = useState(atual || (ano + "-12-15"));
+    const [todos, setTodos] = useState((talhoes || []).length > 1);
+    const ids = todos ? talhoes.map((t) => t.id) : [talhao.id];
+    const valido = data && String(data).slice(0, 4) === String(ano);
+    return React.createElement(Modal, { title: "Fim da adubação de " + ano, onClose },
+        React.createElement("p", { className: "text-sm text-stone-600 mb-3" }, "Escolha o \u00FAltimo dia de aplica\u00E7\u00E3o de adubo deste ano. Depois dessa data vem a pausa: colheita, uma nova an\u00E1lise de solo e o in\u00EDcio do pr\u00F3ximo ano de tratamento."),
+        React.createElement(Field, { label: "Data final da adubação" },
+            React.createElement("input", { type: "date", className: inputCls, value: data, onChange: (e) => setData(e.target.value) })),
+        !valido && React.createElement("p", { className: "text-xs text-[#a8442f] -mt-2 mb-3" }, "A data precisa ser de " + ano + "."),
+        (talhoes || []).length > 1 && (React.createElement("label", { className: "flex items-center gap-2 mb-3 text-sm text-stone-700 bg-[#f2ece0] rounded-lg px-3 py-2" },
+            React.createElement("input", { type: "checkbox", checked: todos, onChange: (e) => setTodos(e.target.checked), className: "w-4 h-4 accent-[#33422e]" }),
+            "Usar a mesma data nos " + talhoes.length + " talh\u00F5es")),
+        React.createElement(PrimaryBtn, { disabled: !valido, onClick: () => { onSalvar(ids, ano, data); } },
+            React.createElement(Icon, { name: "check", size: 18 }), " Salvar data final"),
+        atual && React.createElement("button", { type: "button", onClick: () => onSalvar(ids, ano, null), className: "w-full mt-2 text-sm font-semibold text-[#a8442f] py-2" }, "Remover a data final"));
+}
+function FaixaCiclo({ talhao, ano, onEditar, onNovaAnalise }) {
+    const fim = fimCicloDoTalhao(talhao, ano);
+    const hojeISO = new Date().toISOString().slice(0, 10);
+    const anoHoje = new Date().getFullYear();
+    if (!fim) {
+        return React.createElement("button", { type: "button", onClick: onEditar, className: "w-full flex items-center justify-center gap-2 border border-dashed border-[#9fb08f] text-[#33422e] rounded-xl py-2 text-xs font-semibold mb-3" },
+            "\uD83C\uDFC1 Definir a data final da aduba\u00E7\u00E3o de " + ano);
+    }
+    const encerrado = hojeISO > fim && ano === anoHoje;
+    const dias = Math.round((new Date(fim + "T12:00:00") - new Date(hojeISO + "T12:00:00")) / 86400000);
+    return React.createElement("div", { className: "mb-3" },
+        React.createElement("div", { className: "flex items-center justify-between gap-2 bg-white rounded-xl border border-stone-200 px-3 py-2" },
+            React.createElement("span", { className: "text-xs text-stone-600" }, "\uD83C\uDFC1 Adubação de " + ano + " vai até ", React.createElement("b", null, dataBRcurta(fim)),
+                !encerrado && ano === anoHoje && dias >= 0 ? " (faltam " + dias + (dias === 1 ? " dia)" : " dias)") : ""),
+            React.createElement("button", { type: "button", onClick: onEditar, className: "text-xs font-semibold text-[#33422e] underline shrink-0" }, "Alterar")),
+        encerrado && React.createElement("div", { className: "mt-2 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800" },
+            React.createElement("p", { className: "font-semibold mb-1" }, "Ciclo de " + ano + " encerrado em " + dataBRcurta(fim)),
+            React.createElement("p", null, "Hora da pausa: depois da colheita, colete uma nova an\u00E1lise de solo para come\u00E7ar o pr\u00F3ximo ano de tratamento."),
+            onNovaAnalise && React.createElement("button", { type: "button", onClick: onNovaAnalise, className: "mt-2 bg-[#33422e] text-white rounded-lg px-3 py-1.5 font-semibold" }, "Nova an\u00E1lise de solo")));
+}
 /* ---- Tela de detalhe do talhão ---- */
-function TalhaoDetail({ talhao, talhoes, analises, adubacoes, agendamentos, ocorrencias, defensivos, despesas, comprasGlobais, tabelas, onBack, onAddAnalise, onUpdateAnalise, onDeleteAnalise, onAddAdubacao, onAddAdubacaoEmLote, onAddDefensivoEmLote, onUpdateAdubacao, onDeleteAdubacao, onAddOcorrencia, onUpdateOcorrencia, onDeleteOcorrencia, onAddDefensivo, onUpdateDefensivo, onDeleteDefensivo, onAddDespesa, onAddDespesaEmLote, onUpdateDespesa, onDeleteDespesa, onDeleteTalhao, }) {
+function TalhaoDetail({ talhao, talhoes, analises, adubacoes, agendamentos, ocorrencias, defensivos, despesas, comprasGlobais, tabelas, onBack, onAddAnalise, onUpdateAnalise, onDeleteAnalise, onAddAdubacao, onAddAdubacaoEmLote, onAddDefensivoEmLote, onUpdateAdubacao, onDeleteAdubacao, onAddOcorrencia, onUpdateOcorrencia, onDeleteOcorrencia, onAddDefensivo, onUpdateDefensivo, onDeleteDefensivo, onAddDespesa, onAddDespesaEmLote, onUpdateDespesa, onDeleteDespesa, onDeleteTalhao, onSalvarFimCiclo, }) {
     const [tab, setTab] = useState("recomendacao");
+    const [showFimCiclo, setShowFimCiclo] = useState(false);
     useEffect(() => { window.scrollTo(0, 0); }, [tab]);
     const [despesasExpandidas, setDespesasExpandidas] = useState({});
     const toggleDespesaExpandida = (id) => setDespesasExpandidas((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -4118,6 +4223,8 @@ function TalhaoDetail({ talhao, talhoes, analises, adubacoes, agendamentos, ocor
                 todosAnos.map((ano) => (React.createElement("button", { key: ano, onClick: () => setAnoSelecionado(ano), className: `px-3 py-1 rounded-full text-xs font-semibold shrink-0 ${anoSelecionado === ano ? "bg-[#33422e] text-white" : "bg-white text-stone-500 border border-stone-200"}` },
                     ano,
                     ano === anoAtual ? " (atual)" : ""))))),
+            tab !== "recomendacao" && React.createElement(FaixaCiclo, { talhao: talhao, ano: anoSelecionado, onEditar: () => setShowFimCiclo(true), onNovaAnalise: tab === "analises" ? () => setShowAnaliseForm(true) : (() => { setTab("analises"); setShowAnaliseForm(true); }) }),
+            tab === "recomendacao" && React.createElement(FaixaCiclo, { talhao: talhao, ano: new Date().getFullYear(), onEditar: () => setShowFimCiclo(true), onNovaAnalise: () => { setTab("analises"); setShowAnaliseForm(true); } }),
             tab === "recomendacao" && React.createElement(CartaoRecomendacao, { talhao: talhao, talhoes: talhoes, analise: ultimaAnalise, adubacoes: adubacoes, agendamentos: agendamentos, tabelas: tabelas, onAddAdubacaoEmLote: onAddAdubacaoEmLote }),
             tab === "analises" && (React.createElement("div", { className: "space-y-3" },
                 React.createElement("button", { onClick: () => setShowAnaliseForm(true), className: "w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#9fb08f] text-[#33422e] rounded-xl py-3 text-sm font-semibold" },
@@ -4214,6 +4321,7 @@ function TalhaoDetail({ talhao, talhoes, analises, adubacoes, agendamentos, ocor
                         despesasExpandidas[d.id] ? "Ocultar detalhes \u25B2" : "Ver detalhes \u25BC")),
                     d.obs && despesasExpandidas[d.id] && React.createElement("p", { className: "text-xs text-stone-400 italic mt-1" }, d.obs)))))),
             tab !== "recomendacao" && (React.createElement(BotaoExcluirTalhao, { talhao, onDeleteTalhao }))),
+        showFimCiclo && (React.createElement(FimCicloModal, { talhao: talhao, talhoes: talhoes, ano: tab === "recomendacao" ? new Date().getFullYear() : anoSelecionado, onClose: () => setShowFimCiclo(false), onSalvar: (ids, ano, dataISO) => { onSalvarFimCiclo(ids, ano, dataISO); setShowFimCiclo(false); } })),
         showAnaliseForm && (React.createElement(AnaliseForm, { onClose: () => setShowAnaliseForm(false), onSave: (a) => { onAddAnalise(talhao.id, a); setShowAnaliseForm(false); } })),
         editAnalise && (React.createElement(AnaliseForm, { initial: editAnalise, onClose: () => setEditAnalise(null), onSave: (a) => { onUpdateAnalise(a); setEditAnalise(null); } })),
         showAdubacaoForm && (React.createElement(AdubacaoForm, { compras: comprasGlobais, talhao: talhao, talhoes: talhoes, onClose: () => setShowAdubacaoForm(false), onSave: (a) => {
@@ -4693,7 +4801,7 @@ function CalculadorasScreen({ talhoes, onBack }) {
 }
 /* ---- Formulário: agendar aplicação futura ---- */
 const FORMAS_APLICACAO = [["solo", "Via Solo"], ["foliar", "Foliar"], ["fertirrigacao", "Fertirrigação"], ["irrigacao", "Irrigação"], ["defensivo", "Defensivo"], ["outro", "Outro"]];
-function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compras }) {
+function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compras, analises, adubacoes, agendamentos, tabelas }) {
     const [data, setData] = useState(initial ? initial.data : (dataInicial || new Date().toISOString().slice(0, 10)));
     // Datas extras (opcional) — pra agendar a mesma aplicação em vários dias
     // de uma vez (ex: fertirrigação semanal), sem repetir o formulário.
@@ -4704,6 +4812,9 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
     const [talhaoId, setTalhaoId] = useState(initial ? initial.talhaoId : (talhoes[0] ? talhoes[0].id : ""));
     const [todosOsTalhoes, setTodosOsTalhoes] = useState(false);
     const [forma, setForma] = useState(initial ? initial.forma : "solo");
+    // Repetir a aplicação (semanal/mensal) até a data final do ciclo
+    const [freq, setFreq] = useState("uma");
+    const [dataFim, setDataFim] = useState(null);
     const [obs, setObs] = useState(initial ? initial.obs || "" : "");
     // Quantidade prevista é opcional — alimenta a "previsão" (sombra) na
     // barra de Meta x aplicado (só faz sentido pra adubação) E a "reserva"
@@ -4729,7 +4840,6 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
     };
     const adicionarItem = () => setItens((prev) => [...prev, novoItem()]);
     const removerItem = (i) => setItens((prev) => prev.filter((_, idx) => idx !== i));
-    const valido = data && (!temProduto || itens.every((it) => it.produto.trim())) && (todosOsTalhoes ? talhoes.length > 0 : talhaoId);
     const montarDadosItem = (it, dataAlvo) => {
         const base = { data: dataAlvo, forma, produto: it.produto.trim(), obs: obs.trim() };
         if (temProduto && it.quantidade) {
@@ -4741,15 +4851,58 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
         return base;
     };
     const talhoesAlvo = todosOsTalhoes ? talhoes.map((t) => t.id) : [talhaoId];
-    const todasDatas = [data, ...datasExtras.filter((d) => d)];
+    const anoDaData = Number(String(data).slice(0, 4));
+    const fimsDosAlvos = talhoesAlvo.map((tid) => fimCicloDoTalhao(talhoes.find((t) => t.id === tid), anoDaData)).filter(Boolean).sort();
+    const fimPadrao = fimsDosAlvos[0] || "";
+    const dataFimEf = dataFim !== null ? dataFim : fimPadrao;
+    const todasDatas = freq !== "uma" && !initial ? gerarDatasRepetidas(data, dataFimEf, freq) : [data, ...datasExtras.filter((d) => d)];
+    // Sugestão de quantidade: o que falta da meta do ano, dividido pelas aplicações
+    const sugestaoAtiva = !initial && temProduto && forma !== "defensivo" && !!tabelas;
+    const faltasAlvo = sugestaoAtiva ? talhoesAlvo.map((tid) => {
+        const t = talhoes.find((x) => x.id === tid);
+        return t ? { t, f: faltaDoCiclo(t, (analises || {})[tid], (adubacoes || {})[tid], (agendamentos || {})[tid], tabelas, anoDaData) } : null;
+    }).filter(Boolean) : [];
+    const okFaltas = faltasAlvo.filter((x) => x.f.ok);
+    const semAnaliseQtd = faltasAlvo.length - okFaltas.length;
+    const areaFaltas = okFaltas.reduce((a, x) => a + (Number(x.t.area) || 0), 0);
+    const faltaTot = {};
+    ["n", "p2o5", "k2o", "s", "zn", "cu", "mn", "b"].forEach((k) => { faltaTot[k] = okFaltas.reduce((a, x) => a + (x.f.falta[k] || 0), 0); });
+    const sugestaoItem = (it) => {
+        if (!sugestaoAtiva || okFaltas.length === 0 || areaFaltas <= 0) return null;
+        const comp = it.composicao || {};
+        const candidatos = NUTRIENTES_MACRO.concat(NUTRIENTES_MICRO).filter((nu) => nu.key !== "mg" && Number(comp[nu.key]) > 0 && faltaTot[nu.key] / areaFaltas > 0.5);
+        if (candidatos.length === 0) return Object.keys(comp).length > 0 ? { vazio: true } : null;
+        const ordenados = [...candidatos].sort((a, b) => Number(comp[b.key]) - Number(comp[a.key]));
+        const base = candidatos.find((c) => c.key === it.baseNu) || ordenados[0];
+        const nApps = Math.max(1, todasDatas.length);
+        const kgNuHa = faltaTot[base.key] / areaFaltas;
+        const doseHa = kgNuHa / nApps / (Number(comp[base.key]) / 100);
+        const cobre = candidatos.map((c) => ({ nu: c, pct: Math.round(((doseHa * nApps * (Number(comp[c.key]) / 100)) / (faltaTot[c.key] / areaFaltas)) * 100) }));
+        return { base, candidatos, doseHa, nApps, kgNuHa, cobre };
+    };
+    const valido = data && (!temProduto || itens.every((it) => it.produto.trim())) && (todosOsTalhoes ? talhoes.length > 0 : talhaoId) && todasDatas.length > 0;
     const totalRegistros = talhoesAlvo.length * todasDatas.length * itens.length;
     return (React.createElement(Modal, { title: initial ? "Editar agendamento" : "Agendar aplicação", onClose: onClose },
         React.createElement(Field, { label: "Data planejada" },
             React.createElement("input", { type: "date", className: inputCls, value: data, onChange: (e) => setData(e.target.value) })),
-        datasExtras.map((d, i) => (React.createElement("div", { key: i, className: "flex items-center gap-2 mb-3 -mt-1" },
+        !initial && React.createElement(Field, { label: "Repetir esta aplica\u00E7\u00E3o" },
+            React.createElement(ChoiceRow, { options: FREQUENCIAS_AGENDA, value: freq, onChange: setFreq, cols: 3 })),
+        !initial && freq !== "uma" && React.createElement("div", { className: "bg-[#f2ece0] rounded-lg p-3 mb-3 -mt-1" },
+            React.createElement(Field, { label: "Repetir at\u00E9 a data final" },
+                React.createElement("input", { type: "date", className: inputCls, value: dataFimEf, onChange: (e) => setDataFim(e.target.value) })),
+            fimPadrao
+                ? React.createElement("p", { className: "text-[11px] text-stone-500 -mt-2 mb-1" }, "Data final da aduba\u00E7\u00E3o de " + anoDaData + " no talh\u00E3o: " + dataBRcurta(fimPadrao))
+                : React.createElement("p", { className: "text-[11px] text-amber-700 -mt-2 mb-1" }, "Este talh\u00E3o ainda n\u00E3o tem data final do ciclo (defina na aba An\u00E1lises). Escolha uma data aqui."),
+            todasDatas.length > 0
+                ? React.createElement("p", { className: "text-xs text-[#33422e]" }, React.createElement("b", null, todasDatas.length + (todasDatas.length === 1 ? " aplica\u00E7\u00E3o" : " aplica\u00E7\u00F5es")), ": " + todasDatas.slice(0, 6).map(dataBRcurta).join(", ") + (todasDatas.length > 6 ? ", ... at\u00E9 " + dataBRcurta(todasDatas[todasDatas.length - 1]) : ""))
+                : React.createElement("p", { className: "text-xs text-[#a8442f]" }, "Escolha uma data final depois da data de in\u00EDcio."),
+            freq === "mes2" && React.createElement("p", { className: "text-[11px] text-stone-400 mt-1" }, "2x por m\u00EAs = a cada 15 dias."),
+            freq === "mes3" && React.createElement("p", { className: "text-[11px] text-stone-400 mt-1" }, "3x por m\u00EAs = a cada 10 dias."),
+            freq === "sem2" && React.createElement("p", { className: "text-[11px] text-stone-400 mt-1" }, "2x por semana = a cada 3 e 4 dias, alternando.")),
+        freq === "uma" && datasExtras.map((d, i) => (React.createElement("div", { key: i, className: "flex items-center gap-2 mb-3 -mt-1" },
             React.createElement("input", { type: "date", className: inputCls, value: d, onChange: (e) => atualizarDataExtra(i, e.target.value) }),
             React.createElement("button", { type: "button", onClick: () => removerDataExtra(i), className: "text-xs text-[#a8442f] font-semibold shrink-0 px-1" }, "Remover")))),
-        !initial && React.createElement("button", { type: "button", onClick: adicionarDataExtra, className: "w-full flex items-center justify-center gap-1 border border-dashed border-[#9fb08f] text-[#33422e] rounded-lg py-2 text-xs font-semibold mb-3" },
+        !initial && freq === "uma" && React.createElement("button", { type: "button", onClick: adicionarDataExtra, className: "w-full flex items-center justify-center gap-1 border border-dashed border-[#9fb08f] text-[#33422e] rounded-lg py-2 text-xs font-semibold mb-3" },
             React.createElement(Icon, { name: "plus", size: 14 }),
             " Adicionar outra data (agenda tudo de uma vez)"),
         !initial && talhoes.length > 1 && (React.createElement("label", { className: "flex items-center gap-2 mb-3 -mt-1 text-sm text-stone-700 bg-[#f2ece0] rounded-lg px-3 py-2" },
@@ -4782,6 +4935,22 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
                             React.createElement("option", { value: "L/ha" }, "L/ha (dose)"),
                             React.createElement("option", { value: "g/planta" }, "g/planta (dose)"),
                             React.createElement("option", { value: "mL/planta" }, "mL/planta (dose)")))),
+                (() => {
+                    const sg = sugestaoItem(it);
+                    if (!sg) return null;
+                    if (sg.vazio) return React.createElement("p", { className: "text-[11px] text-stone-500 -mt-1 mb-2" }, "Nada deste produto falta na meta de " + anoDaData + " (o que faltava j\u00E1 foi aplicado ou est\u00E1 agendado).");
+                    return React.createElement("div", { className: "bg-[#fff7e0] border border-[#e8d9a8] rounded-lg px-3 py-2 -mt-1 mb-2" },
+                        React.createElement("p", { className: "text-[11px] font-semibold text-[#8a6d3b] uppercase" }, "\uD83D\uDCA1 Sugest\u00E3o do app"),
+                        React.createElement("p", { className: "text-sm text-stone-800 mt-1" }, React.createElement("b", null, fmtBR(sg.doseHa, 1) + " kg/ha"), " por aplica\u00E7\u00E3o"),
+                        React.createElement("p", { className: "text-[11px] text-stone-600 mt-1" },
+                            "Faltam " + fmtBR(sg.kgNuHa, 1) + " kg/ha de " + sg.base.label + " na meta de " + anoDaData + ", divididos em " + sg.nApps + (sg.nApps === 1 ? " aplica\u00E7\u00E3o" : " aplica\u00E7\u00F5es") + (semAnaliseQtd > 0 ? ". " + semAnaliseQtd + " talh\u00E3o(\u00F5es) sem an\u00E1lise de solo ficaram de fora do c\u00E1lculo." : ".")),
+                        sg.candidatos.length > 1 && React.createElement("div", { className: "mt-2" },
+                            React.createElement("p", { className: "text-[11px] text-stone-500 mb-1" }, "Calcular pela necessidade de:"),
+                            React.createElement("div", { className: "flex flex-wrap gap-1" }, sg.candidatos.map((c) => React.createElement("button", { key: c.key, type: "button", onClick: () => atualizarItem(i, "baseNu", c.key), className: "px-2.5 py-1 rounded-full text-xs font-semibold " + (sg.base.key === c.key ? "bg-[#33422e] text-white" : "bg-white text-stone-600 border border-stone-200") }, c.label)))),
+                        React.createElement("p", { className: "text-[11px] text-stone-500 mt-2" }, "No total das " + sg.nApps + " aplica\u00E7\u00F5es cobre: " + sg.cobre.map((c) => c.nu.label + " " + c.pct + "%").join(" \u00B7 ") + " do que falta."),
+                        sg.cobre.some((c) => c.pct > 115) && React.createElement("p", { className: "text-[11px] text-[#a8442f] mt-1" }, "Passa de 100% em algum nutriente. Pode ser bom complementar com outro adubo."),
+                        React.createElement("button", { type: "button", onClick: () => setItens((prev) => prev.map((x, idx) => idx === i ? { ...x, quantidade: String(Math.round(sg.doseHa * 10) / 10), unidade: "kg/ha" } : x)), className: "mt-2 w-full bg-[#33422e] text-white text-sm font-semibold rounded-lg py-2" }, "Usar " + fmtBR(sg.doseHa, 1) + " kg/ha"));
+                })(),
                 (() => {
                     const ehDose = ["kg/ha", "L/ha", "g/planta", "mL/planta"].includes(it.unidade);
                     if (!ehDose || !it.quantidade)
@@ -5162,7 +5331,7 @@ function CartaoChuva() {
             } })),
     ));
 }
-function CalendarioScreen({ talhoes, adubacoes, defensivos, despesas, agendamentos, compras, onAddAgendamento, onAddAgendamentoEmLote, onAddAdubacao, onAddAdubacaoEmLote, onAddDefensivo, onUpdateAgendamento, onDeleteAgendamento, onUpdateAdubacao, onDeleteAdubacao, onBack }) {
+function CalendarioScreen({ talhoes, analises, tabelas, adubacoes, defensivos, despesas, agendamentos, compras, onAddAgendamento, onAddAgendamentoEmLote, onAddAdubacao, onAddAdubacaoEmLote, onAddDefensivo, onUpdateAgendamento, onDeleteAgendamento, onUpdateAdubacao, onDeleteAdubacao, onBack }) {
     const [showForm, setShowForm] = useState(false);
     const [editando, setEditando] = useState(null);
     const [editandoIrrigacao, setEditandoIrrigacao] = useState(null);
@@ -5399,7 +5568,7 @@ function CalendarioScreen({ talhoes, adubacoes, defensivos, despesas, agendament
                 ev.item.obs && React.createElement("p", { className: "text-xs text-stone-400 italic mt-0.5" }, ev.item.obs)))),
             React.createElement("p", { className: "text-xs text-stone-400 px-1" }, "Ao marcar um agendamento como \"Conclu\u00EDdo\", ele vira um registro de verdade no hist\u00F3rico do talh\u00E3o (com custo) e sai desta lista."),
             React.createElement(CartaoEpocasCafeicultor, null)),
-        showForm && (React.createElement(AgendamentoForm, { talhoes: talhoes, compras: compras, dataInicial: diaSelecionado, onClose: () => setShowForm(false), onSave: (a) => {
+        showForm && (React.createElement(AgendamentoForm, { talhoes: talhoes, compras: compras, analises: analises, adubacoes: adubacoes, agendamentos: agendamentos, tabelas: tabelas, dataInicial: diaSelecionado, onClose: () => setShowForm(false), onSave: (a) => {
                 if (a.multiplos) {
                     onAddAgendamentoEmLote(a.registros);
                 }
@@ -8131,6 +8300,14 @@ function App() {
     const deleteTabelaCustomizada = (id) => persistTabelasCustomizadas(tabelasCustomizadas.filter((x) => x.id !== id));
     const todasTabelas = { ...TABELAS, ...Object.fromEntries(tabelasCustomizadas.map((t) => [t.id, t])) };
     const addTalhao = (t) => { persistTalhoes([t, ...talhoes]); setShowTalhaoForm(false); };
+    const salvarFimCiclo = (ids, ano, dataISO) => {
+        persistTalhoes(talhoes.map((t) => {
+            if (!ids.includes(t.id)) return t;
+            const m = { ...(t.fimAdubacao || {}) };
+            if (dataISO) m[String(ano)] = dataISO; else delete m[String(ano)];
+            return { ...t, fimAdubacao: m };
+        }));
+    };
     const updateTalhao = (t) => { persistTalhoes(talhoes.map((x) => (x.id === t.id ? t : x))); setEditTalhao(null); };
     const deleteTalhao = (id) => {
         persistTalhoes(talhoes.filter((t) => t.id !== id));
@@ -8287,7 +8464,7 @@ function App() {
             onAbrirCalculadoras: () => { setShowAjuda(false); setShowCalculadoras(true); },
             onAbrirCalendario: () => { setShowAjuda(false); setShowCalendario(true); },
             onAbrirConfiguracoes: () => { setShowAjuda(false); setShowConfiguracoes(true); },
-        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showComunidade ? (React.createElement(TelaComunidade, { onBack: () => setShowComunidade(false), meuNome: meuNomeComunidade, souAdmin: false })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], agendamentos: agendamentos[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" }, BannerVencimento(() => setShowConfiguracoes(true)),
+        })) : showConfiguracoes ? (React.createElement(TelaConfiguracoes, { onBack: () => setShowConfiguracoes(false), onDadosRestaurados: () => { recarregarTudo(); setShowConfiguracoes(false); }, tabelasCustomizadas: tabelasCustomizadas, onAddTabelaCustomizada: addTabelaCustomizada, onUpdateTabelaCustomizada: updateTabelaCustomizada, onDeleteTabelaCustomizada: deleteTabelaCustomizada })) : showRelatorio ? (React.createElement(RelatorioFinanceiroScreen, { talhoes: talhoes, adubacoes: adubacoes, ocorrencias: ocorrencias, defensivos: defensivos, receitas: receitas, despesas: despesas, compras: compras, onBack: () => setShowRelatorio(false) })) : showCompras ? (React.createElement(ComprasScreen, { compras: compras, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, talhoes: talhoes, onAdd: addCompra, onUpdate: updateCompra, onDelete: deleteCompra, receitas: receitas, onAddReceita: addReceita, onAddReceitaEmLote: addReceitaEmLote, onUpdateReceita: updateReceita, onDeleteReceita: deleteReceita, onAddDespesaEmLote: addDespesaEmLote, onBack: () => setShowCompras(false) })) : showCalendario ? (React.createElement(CalendarioScreen, { talhoes: talhoes, analises: analises, tabelas: todasTabelas, adubacoes: adubacoes, defensivos: defensivos, despesas: despesas, agendamentos: agendamentos, compras: compras, onAddAgendamento: addAgendamento, onAddAgendamentoEmLote: addAgendamentoEmLote, onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onUpdateAgendamento: updateAgendamento, onDeleteAgendamento: deleteAgendamento, onAddDefensivo: addDefensivo, onUpdateAdubacao: updateAdubacao, onDeleteAdubacao: deleteAdubacao, onBack: () => setShowCalendario(false) })) : showComunidade ? (React.createElement(TelaComunidade, { onBack: () => setShowComunidade(false), meuNome: meuNomeComunidade, souAdmin: false })) : showCalculadoras ? (React.createElement(CalculadorasScreen, { talhoes: talhoes, onBack: () => setShowCalculadoras(false) })) : selected ? (React.createElement(TalhaoDetail, { talhao: selected, talhoes: talhoes, analises: analises[selected.id] || [], adubacoes: adubacoes[selected.id] || [], agendamentos: agendamentos[selected.id] || [], ocorrencias: ocorrencias[selected.id] || [], defensivos: defensivos[selected.id] || [], despesas: despesas[selected.id] || [], comprasGlobais: compras, tabelas: todasTabelas, onBack: () => setSelectedId(null), onAddAnalise: addAnalise, onUpdateAnalise: (a) => updateAnalise(selected.id, a), onDeleteAnalise: (id) => deleteAnalise(selected.id, id), onSalvarFimCiclo: salvarFimCiclo, onAddAdubacao: addAdubacao, onAddAdubacaoEmLote: addAdubacaoEmLote, onAddDefensivoEmLote: addDefensivoEmLote, onUpdateAdubacao: (a) => updateAdubacao(selected.id, a), onDeleteAdubacao: (id) => deleteAdubacao(selected.id, id), onAddOcorrencia: (o) => addOcorrencia(selected.id, o), onUpdateOcorrencia: (o) => updateOcorrencia(selected.id, o), onDeleteOcorrencia: (id) => deleteOcorrencia(selected.id, id), onAddDefensivo: addDefensivo, onUpdateDefensivo: (d) => updateDefensivo(selected.id, d), onDeleteDefensivo: (id) => deleteDefensivo(selected.id, id), onAddDespesa: (d) => addDespesa(selected.id, d), onAddDespesaEmLote: addDespesaEmLote, onUpdateDespesa: (d) => updateDespesa(selected.id, d), onDeleteDespesa: (id) => deleteDespesa(selected.id, id), onDeleteTalhao: deleteTalhao })) : (React.createElement("div", { className: "pb-24" }, BannerVencimento(() => setShowConfiguracoes(true)),
             React.createElement("div", { className: "bg-gradient-to-br from-[#3d4f36] to-[#242e1f] text-white px-4 pt-6 pb-6 rounded-b-3xl shadow-lg" },
                 React.createElement("div", { className: "flex items-center justify-between" },
                     React.createElement("div", { className: "flex items-center gap-2" },
