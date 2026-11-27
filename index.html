@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v173-converte-unidade";
+const APP_VERSION = "build-2026-11-15-v174-relatorio-completo";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -2069,18 +2069,36 @@ function construirRelatorioPDF(opts) {
         y += 34;
         doc.setFont("helvetica", "normal");
         doc.setFontSize(11);
-        secao.linhas.forEach(([label, valor]) => {
-            if (y > 770) {
+        secao.linhas.forEach(([label, valor, detalhe]) => {
+            const valStr = String(valor == null ? "" : valor);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(11);
+            const larguraValor = doc.getTextWidth(valStr);
+            doc.setFont("helvetica", "normal");
+            const larguraLabel = Math.max(120, pageW - margin * 2 - 20 - larguraValor - 12);
+            const linhasLabel = doc.splitTextToSize(String(label), larguraLabel);
+            const linhasDetalhe = detalhe ? doc.splitTextToSize(String(detalhe), pageW - margin * 2 - 20) : [];
+            const altura = linhasLabel.length * 13 + linhasDetalhe.length * 11 + 7;
+            if (y + altura > 800) {
                 doc.addPage();
                 y = margin;
             }
-            doc.setTextColor(110, 110, 110);
-            doc.text(String(label), margin + 10, y);
+            doc.setFontSize(11);
+            doc.setTextColor(70, 70, 70);
+            doc.text(linhasLabel, margin + 10, y);
             doc.setTextColor(30, 30, 30);
             doc.setFont("helvetica", "bold");
-            doc.text(String(valor), pageW - margin - 10, y, { align: "right" });
+            doc.text(valStr, pageW - margin - 10, y, { align: "right" });
             doc.setFont("helvetica", "normal");
-            y += 20;
+            let yy = y + linhasLabel.length * 13;
+            if (linhasDetalhe.length) {
+                doc.setFontSize(8.5);
+                doc.setTextColor(125, 125, 125);
+                doc.text(linhasDetalhe, margin + 10, yy);
+                doc.setFontSize(11);
+                yy += linhasDetalhe.length * 11;
+            }
+            y = yy + 7;
         });
         y += 12;
     });
@@ -2128,6 +2146,132 @@ async function compartilharRelatorioPDF(opts) {
     }
     // sem suporte a compartilhar arquivo (ex: navegador de computador) — baixa normalmente
     doc.save(nomeArquivo);
+}
+/* ---- Relatório completo: helpers de formatação e resumos por produto ---- */
+function dataBRrel(iso) { return iso ? new Date(iso + "T00:00:00").toLocaleDateString("pt-BR") : ""; }
+function numRel(n) { const v = Number(n) || 0; return fmtBR(v, Math.abs(v - Math.round(v)) < 0.005 ? 0 : 2); }
+function baseUnidadeCompra(un) { return (un === "L" || un === "galoes") ? "L" : (un === "kg" || un === "sacos") ? "kg" : (un || "un"); }
+function rotuloUnidadeCompra(c) {
+    const q = numRel(c.quantidade);
+    if (c.unidade === "sacos") return q + " saco(s) de " + numRel(c.pesoSaco || 50) + " kg";
+    if (c.unidade === "galoes") return q + " galão(ões) de " + numRel(c.pesoSaco || 20) + " L";
+    return q + " " + (c.unidade || "");
+}
+function resumirComprasPorProduto(lista) {
+    const mapa = {};
+    [...lista].sort((a, b) => (a.data < b.data ? -1 : 1)).forEach((c) => {
+        if (!c.produto) return;
+        const k = c.produto.trim().toLowerCase();
+        const base = paraUnidadeBase(c.quantidade, c.unidade, c.pesoSaco);
+        const total = Number(c.valorTotal) || 0;
+        const preco = base > 0 ? total / base : null;
+        const m = mapa[k] || (mapa[k] = { produto: c.produto.trim(), categoria: c.categoria || "", un: baseUnidadeCompra(c.unidade), qtd: 0, total: 0, n: 0, ultimo: null, ultimaData: "", min: null, max: null });
+        m.qtd += base; m.total += total; m.n += 1;
+        if (preco != null) {
+            m.ultimo = preco; m.ultimaData = c.data;
+            m.min = m.min == null ? preco : Math.min(m.min, preco);
+            m.max = m.max == null ? preco : Math.max(m.max, preco);
+        }
+    });
+    return Object.values(mapa).map((m) => ({ ...m, medio: m.qtd > 0 ? m.total / m.qtd : null })).sort((a, b) => b.total - a.total);
+}
+function categoriaDoProdutoCompras(nome, compras, padrao) {
+    const alvo = (nome || "").trim().toLowerCase();
+    const c = (compras || []).filter((x) => x.produto && x.produto.trim().toLowerCase() === alvo).sort((a, b) => (a.data < b.data ? 1 : -1))[0];
+    return (c && c.categoria) || padrao;
+}
+function resumirAplicadosPorProduto(itens, compras) {
+    const mapa = {};
+    const add = (nome, cat, qtd, un, custo) => {
+        const k = nome.trim().toLowerCase();
+        const m = mapa[k] || (mapa[k] = { produto: nome.trim(), categoria: cat, un, qtd: 0, custo: 0, n: 0 });
+        m.qtd += qtd || 0; m.custo += custo || 0; m.n += 1;
+    };
+    itens.forEach(({ talhao, ad, de }) => {
+        const area = Number(talhao.area) || 0, pl = Number(talhao.numPlantas) || 0;
+        ad.forEach((a) => {
+            if (!a.produto || a.produto === "Irrigação") return;
+            const kg = quantidadeEmKg(a, area, pl);
+            add(a.produto, "Adubo", kg, (a.unidade === "L" || a.unidade === "L/ha" || a.unidade === "mL/planta") ? "L" : "kg", Number(a.custo) || 0);
+        });
+        de.forEach((d) => {
+            if (!d.produto) return;
+            const q = (d.unidade === "L/ha" || d.unidade === "kg/ha") ? (Number(d.dose) || 0) * area : null;
+            add(d.produto, categoriaDoProdutoCompras(d.produto, compras, "Defensivo"), q, d.unidade === "L/ha" ? "L" : "kg", Number(d.custo) || 0);
+        });
+    });
+    return Object.values(mapa).map((m) => ({ ...m, precoUn: m.qtd > 0 && m.custo > 0 ? m.custo / m.qtd : null })).sort((a, b) => b.custo - a.custo);
+}
+function descreverAplicacao(a, talhao) {
+    const q = Number(a.quantidade != null ? a.quantidade : a.dose);
+    if (!isFinite(q) || !q) return "";
+    let txt = numRel(q) + " " + (a.unidade || "");
+    const area = Number(talhao.area) || 0, pl = Number(talhao.numPlantas) || 0;
+    if (a.unidade === "kg/ha" || a.unidade === "L/ha") txt += " = " + numRel(q * area) + (a.unidade === "L/ha" ? " L" : " kg") + " no talhão";
+    else if (a.unidade === "sacos") txt += " = " + numRel(q * (Number(a.pesoSacoRef) || 50)) + " kg";
+    else if ((a.unidade === "g/planta" || a.unidade === "mL/planta") && pl) txt += " = " + numRel(q * pl / 1000) + (a.unidade === "mL/planta" ? " L" : " kg") + " no talhão";
+    return txt;
+}
+function ListaPrecosProdutos({ resumo }) {
+    if (!resumo || resumo.length === 0) return null;
+    return React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-3" },
+        React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase mb-2" }, "Preço detalhado por produto (compras)"),
+        resumo.map((m) => React.createElement("div", { key: m.produto, className: "py-2 border-t border-stone-100 first:border-t-0" },
+            React.createElement("div", { className: "flex items-start justify-between gap-2" },
+                React.createElement("div", { className: "min-w-0" },
+                    React.createElement("p", { className: "text-sm font-medium text-stone-800" }, m.produto),
+                    React.createElement("p", { className: "text-[11px] text-stone-400" }, m.categoria + " · " + m.n + (m.n === 1 ? " compra" : " compras") + " · " + numRel(m.qtd) + " " + m.un)),
+                React.createElement("span", { className: "font-semibold text-[#a8442f] text-sm shrink-0" }, "R$ " + fmtBR(m.total, 2))),
+            m.medio != null && React.createElement("p", { className: "text-[11px] text-stone-500 mt-0.5" },
+                "Médio R$ " + fmtBR(m.medio, 2) + "/" + m.un + " · último R$ " + fmtBR(m.ultimo, 2) + " (" + dataBRrel(m.ultimaData) + ")" + (m.n > 1 && m.min !== m.max ? " · menor R$ " + fmtBR(m.min, 2) + " · maior R$ " + fmtBR(m.max, 2) : "")))));
+}
+function ListaAplicadosProdutos({ resumo }) {
+    if (!resumo || resumo.length === 0) return null;
+    return React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-3" },
+        React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase mb-2" }, "Produtos aplicados (quantidade e custo)"),
+        resumo.map((m) => React.createElement("div", { key: m.produto, className: "py-2 border-t border-stone-100 first:border-t-0" },
+            React.createElement("div", { className: "flex items-start justify-between gap-2" },
+                React.createElement("div", { className: "min-w-0" },
+                    React.createElement("p", { className: "text-sm font-medium text-stone-800" }, m.produto),
+                    React.createElement("p", { className: "text-[11px] text-stone-400" }, m.categoria + " · " + m.n + (m.n === 1 ? " aplicação" : " aplicações") + (m.qtd > 0 ? " · " + numRel(m.qtd) + " " + m.un : ""))),
+                React.createElement("span", { className: "font-semibold text-[#a8442f] text-sm shrink-0" }, m.custo > 0 ? "R$ " + fmtBR(m.custo, 2) : "—")),
+            m.precoUn != null && React.createElement("p", { className: "text-[11px] text-stone-500 mt-0.5" }, "Custo médio R$ " + fmtBR(m.precoUn, 2) + "/" + m.un))));
+}
+/* Caixinhas "o que vai no PDF" + botões Baixar/Compartilhar.
+   opcoes = [{ id, label, padrao, gerar: () => ({titulo, linhas}) | grafico: () => dados }] */
+function ExportarRelatorio({ chave, titulo, subtitulo, opcoes, observacao }) {
+    const storeKey = STORAGE_PREFIX + "relatorio_sel_" + chave;
+    const [sel, setSel] = useState(() => {
+        try { return JSON.parse(localStorage.getItem(storeKey) || "{}") || {}; } catch (e) { return {}; }
+    });
+    const marcado = (o) => sel[o.id] != null ? !!sel[o.id] : o.padrao !== false;
+    const salvar = (n) => { setSel(n); try { localStorage.setItem(storeKey, JSON.stringify(n)); } catch (e) { } };
+    const alternar = (o) => salvar({ ...sel, [o.id]: !marcado(o) });
+    const marcarTodos = (v) => { const n = {}; opcoes.forEach((o) => { n[o.id] = v; }); salvar(n); };
+    const qtdMarcados = opcoes.filter(marcado).length;
+    const dados = () => {
+        const secoes = [];
+        let grafico = null;
+        opcoes.filter(marcado).forEach((o) => {
+            if (o.grafico) { grafico = o.grafico(); return; }
+            const sc = o.gerar();
+            if (sc && sc.linhas && sc.linhas.length) secoes.push(sc);
+        });
+        return { titulo, subtitulo, secoes, graficoSetores: grafico, observacao };
+    };
+    return React.createElement("div", { className: "space-y-2" },
+        React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-3" },
+            React.createElement("div", { className: "flex items-center justify-between mb-1" },
+                React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase" }, "O que vai no PDF (" + qtdMarcados + " de " + opcoes.length + ")"),
+                React.createElement("div", { className: "flex gap-3 text-xs font-semibold text-[#33422e]" },
+                    React.createElement("button", { type: "button", onClick: () => marcarTodos(true) }, "Marcar tudo"),
+                    React.createElement("button", { type: "button", onClick: () => marcarTodos(false) }, "Limpar"))),
+            opcoes.map((o) => React.createElement("label", { key: o.id, className: "flex items-center gap-3 py-2 border-t border-stone-100 first:border-t-0 text-sm text-stone-700" },
+                React.createElement("input", { type: "checkbox", checked: marcado(o), onChange: () => alternar(o), className: "w-5 h-5 accent-[#33422e] shrink-0" }),
+                o.label))),
+        qtdMarcados === 0
+            ? React.createElement("p", { className: "text-xs text-stone-400 text-center py-2" }, "Marque pelo menos uma opção para gerar o PDF.")
+            : React.createElement(BotoesPDF, { dadosRelatorio: dados }));
 }
 function BotoesPDF({ dadosRelatorio }) {
     return (React.createElement("div", { className: "grid grid-cols-2 gap-2" },
@@ -6046,26 +6190,38 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
     comprasDoAno.forEach((c) => {
         comprasPorCategoria[c.categoria] = (comprasPorCategoria[c.categoria] || 0) + (Number(c.valorTotal) || 0);
     });
-    const dadosRelatorioGeral = () => ({
-        titulo: "Relat\u00F3rio Financeiro Geral",
-        subtitulo: `Ano ${ano}`,
-        secoes: [
-            { titulo: "Resumo da lavoura", linhas: [
-                    ["Gasto total (aplicado nos talh\u00F5es)", "R$ " + fmtBR(totalGeral.totalGasto, 2)],
-                    ["Receita total", "R$ " + fmtBR(totalGeral.totalReceita, 2)],
-                    ["Lucro", "R$ " + fmtBR(totalGeral.lucro, 2)],
-                    ["Margem de lucro", margemGeral != null ? fmtBR(margemGeral, 1) + "%" : "\u2014"],
-                    ["Custo por saca \u2014 j\u00E1 aplicado", custoPorSacaGeral != null ? "R$ " + fmtBR(custoPorSacaGeral, 2) + " (" + fmtBR(sacasEsperadasTotal, 0) + " sacas)" : "\u2014"],
-                    ["Custo por saca \u2014 total desembolsado", custoPorSacaDesembolso != null ? "R$ " + fmtBR(custoPorSacaDesembolso, 2) : "\u2014"],
-                    ["Total comprado (estoque)", "R$ " + fmtBR(totalComprasAno, 2)],
-                ] },
-            { titulo: "Despesas gerais por categoria", linhas: CATEGORIAS_DESPESA.filter((c) => despesasPorCategoria[c] > 0).map((c) => [c, "R$ " + fmtBR(despesasPorCategoria[c], 2)]) },
-            { titulo: "Compras por categoria", linhas: CATEGORIAS_COMPRA.filter((c) => comprasPorCategoria[c] > 0).map((c) => [c, "R$ " + fmtBR(comprasPorCategoria[c], 2)]) },
-            { titulo: "Por setor (talh\u00E3o)", linhas: [...linhas].sort((a, b) => b.totalGasto - a.totalGasto).map((l) => [l.talhao.nome, "Receita R$ " + fmtBR(l.totalReceita, 2) + " \u00B7 Despesa R$ " + fmtBR(l.totalGasto, 2) + " \u00B7 Lucro R$ " + fmtBR(l.lucro, 2)]) },
-        ],
-        graficoSetores: [...linhas].sort((a, b) => b.totalGasto - a.totalGasto).map((l) => ({ nome: l.talhao.nome, receita: l.totalReceita, despesa: l.totalGasto })),
-        observacao: "Gasto por talh\u00E3o vem do custo calculado em cada aduba\u00E7\u00E3o/defensivo aplicado (com base no pre\u00E7o da compra) + despesas gerais. \"Total comprado\" \u00E9 o valor gasto em compras no per\u00EDodo, que pode ser maior do que o j\u00E1 aplicado se ainda tiver estoque guardado.",
-    });
+    const ordenaData = (arr) => [...arr].sort((a, b) => (a.data < b.data ? -1 : 1));
+    const resumoComprasProd = resumirComprasPorProduto(comprasDoAno);
+    const resumoAplicados = resumirAplicadosPorProduto(linhas.map((l) => ({ talhao: l.talhao, ad: l.ad, de: l.de })), compras);
+    const opcoesGeral = [
+        { id: "resumo", label: "Resumo da lavoura (gasto, receita, lucro)", gerar: () => ({ titulo: "Resumo da lavoura", linhas: [
+                ["Gasto total (aplicado nos talhões)", "R$ " + fmtBR(totalGeral.totalGasto, 2)],
+                ["Receita total", "R$ " + fmtBR(totalGeral.totalReceita, 2)],
+                ["Lucro", "R$ " + fmtBR(totalGeral.lucro, 2)],
+                ["Margem de lucro", margemGeral != null ? fmtBR(margemGeral, 1) + "%" : "—"],
+                ["Total comprado (estoque, todo o sítio)", "R$ " + fmtBR(totalComprasAno, 2)],
+                ["Despesas gerais", "R$ " + fmtBR(totalDespesasGerais, 2)],
+                ["Total desembolsado (compras + despesas)", "R$ " + fmtBR(desembolsoTotal, 2)],
+            ] }) },
+        { id: "custosaca", label: "Custo por saca", gerar: () => ({ titulo: "Custo por saca", linhas: custoPorSacaGeral == null ? [] : [
+                ["Sacas esperadas", fmtBR(sacasEsperadasTotal, 0)],
+                ["Já aplicado no campo", "R$ " + fmtBR(custoPorSacaGeral, 2)],
+                ["Total desembolsado", custoPorSacaDesembolso != null ? "R$ " + fmtBR(custoPorSacaDesembolso, 2) : "—"],
+            ] }) },
+        { id: "grafico", label: "Gráfico receita x despesa por setor", grafico: () => [...linhas].sort((a, b) => b.totalGasto - a.totalGasto).map((l) => ({ nome: l.talhao.nome, receita: l.totalReceita, despesa: l.totalGasto })) },
+        { id: "setores", label: "Resumo por setor (talhão)", gerar: () => ({ titulo: "Por setor (talhão)", linhas: [...linhas].sort((a, b) => b.totalGasto - a.totalGasto).map((l) => [l.talhao.nome, "Lucro R$ " + fmtBR(l.lucro, 2), "Receita R$ " + fmtBR(l.totalReceita, 2) + " · Despesa R$ " + fmtBR(l.totalGasto, 2) + (l.margem != null ? " · Margem " + fmtBR(l.margem, 1) + "%" : "") + (l.custoPorSaca != null ? " · Custo/saca R$ " + fmtBR(l.custoPorSaca, 2) : "")]) }) },
+        { id: "despcat", label: "Despesas gerais por categoria", gerar: () => ({ titulo: "Despesas gerais por categoria", linhas: CATEGORIAS_DESPESA.filter((c) => despesasPorCategoria[c] > 0).map((c) => [c, "R$ " + fmtBR(despesasPorCategoria[c], 2)]) }) },
+        { id: "compcat", label: "Compras por categoria", gerar: () => ({ titulo: "Compras por categoria", linhas: CATEGORIAS_COMPRA.filter((c) => comprasPorCategoria[c] > 0).map((c) => [c, "R$ " + fmtBR(comprasPorCategoria[c], 2)]) }) },
+        { id: "precos", label: "Preço detalhado por produto (médio, último, menor, maior)", gerar: () => ({ titulo: "Preço por produto (compras de " + ano + ")", linhas: resumoComprasProd.map((m) => [m.produto, "R$ " + fmtBR(m.total, 2), m.categoria + " · " + m.n + (m.n === 1 ? " compra" : " compras") + " · " + numRel(m.qtd) + " " + m.un + (m.medio != null ? " · médio R$ " + fmtBR(m.medio, 2) + "/" + m.un + " · último R$ " + fmtBR(m.ultimo, 2) + " (" + dataBRrel(m.ultimaData) + ")" + (m.n > 1 && m.min !== m.max ? " · menor R$ " + fmtBR(m.min, 2) + " · maior R$ " + fmtBR(m.max, 2) : "") : "")]) }) },
+        { id: "aplicados", label: "Produtos aplicados nos talhões (quantidade e custo)", gerar: () => ({ titulo: "Produtos aplicados (" + ano + ")", linhas: resumoAplicados.map((m) => [m.produto, m.custo > 0 ? "R$ " + fmtBR(m.custo, 2) : "—", m.categoria + " · " + m.n + (m.n === 1 ? " aplicação" : " aplicações") + (m.qtd > 0 ? " · " + numRel(m.qtd) + " " + m.un : "") + (m.precoUn != null ? " · custo médio R$ " + fmtBR(m.precoUn, 2) + "/" + m.un : "")]) }) },
+        { id: "estoque", label: "Saldo do estoque e valor parado", gerar: () => ({ titulo: "Estoque atual (todas as compras)", linhas: calcularEstoque(compras, adubacoes, defensivos, despesas, talhoes, {}).filter((e) => e.comprado > 0).map((e) => [e.produto, "Saldo " + numRel(Math.max(0, e.saldo)) + " " + e.unidade, e.categoria + " · comprado " + numRel(e.comprado) + " · aplicado " + numRel(e.aplicado) + (e.precoPorBase != null && e.saldo > 0 ? " · valor parado R$ " + fmtBR(e.saldo * e.precoPorBase, 2) + " (R$ " + fmtBR(e.precoPorBase, 2) + "/" + e.unidade + ")" : "")]) }) },
+        { id: "comprasdet", label: "Todas as compras (data, quantidade, preço)", padrao: false, gerar: () => ({ titulo: "Compras de " + ano + " (detalhe)", linhas: ordenaData(comprasDoAno).map((c) => { const b = paraUnidadeBase(c.quantidade, c.unidade, c.pesoSaco); return [dataBRrel(c.data) + " · " + (c.produto || c.descricao || "Compra"), "R$ " + fmtBR(Number(c.valorTotal) || 0, 2), (c.categoria || "") + " · " + rotuloUnidadeCompra(c) + (b > 0 ? " · R$ " + fmtBR((Number(c.valorTotal) || 0) / b, 2) + "/" + baseUnidadeCompra(c.unidade) : "")]; }) }) },
+        { id: "adubdet", label: "Adubações aplicadas (lista completa)", padrao: false, gerar: () => ({ titulo: "Adubações aplicadas (" + ano + ")", linhas: ordenaData(linhas.flatMap((l) => l.ad.map((a) => ({ ...a, _t: l.talhao })))).map((a) => [dataBRrel(a.data) + " · " + a.produto + " (" + a._t.nome + ")", a.custo ? "R$ " + fmtBR(Number(a.custo), 2) : "—", descreverAplicacao(a, a._t)]) }) },
+        { id: "defdet", label: "Defensivos/herbicidas aplicados (lista completa)", padrao: false, gerar: () => ({ titulo: "Defensivos aplicados (" + ano + ")", linhas: ordenaData(linhas.flatMap((l) => l.de.map((d) => ({ ...d, _t: l.talhao })))).map((d) => [dataBRrel(d.data) + " · " + d.produto + " (" + d._t.nome + ")", d.custo ? "R$ " + fmtBR(Number(d.custo), 2) : "—", descreverAplicacao(d, d._t) + (d.carencia != null && d.carencia !== "" ? " · carência " + d.carencia + " dias" : "")]) }) },
+        { id: "despdet", label: "Despesas gerais (lista completa)", padrao: false, gerar: () => ({ titulo: "Despesas gerais (" + ano + ")", linhas: ordenaData(linhas.flatMap((l) => l.ds.filter((d) => !d.baixaEstoque).map((d) => ({ ...d, _t: l.talhao })))).map((d) => [dataBRrel(d.data) + " · " + (d.descricao || d.categoria) + " (" + d.categoria + " · " + d._t.nome + ")", "R$ " + fmtBR(Number(d.valorTotal) || 0, 2)]) }) },
+        { id: "recdet", label: "Receitas (lista completa)", padrao: false, gerar: () => ({ titulo: "Receitas (" + ano + ")", linhas: ordenaData(linhas.flatMap((l) => l.rc.map((r) => ({ ...r, _t: l.talhao })))).map((r) => [dataBRrel(r.data) + " · " + (r.descricao || "Receita") + " (" + r._t.nome + ")", "R$ " + fmtBR(Number(r.valorTotal) || 0, 2), r.sacas ? numRel(r.sacas) + " sacas" + (Number(r.sacas) > 0 ? " · R$ " + fmtBR((Number(r.valorTotal) || 0) / Number(r.sacas), 2) + "/saca" : "") : ""]) }) },
+    ];
+    const observacaoGeral = "Gasto por talhão vem do custo calculado em cada adubação/defensivo aplicado (com base no preço da compra) + despesas gerais. \"Total comprado\" é o valor gasto em compras no período, que pode ser maior do que o já aplicado se ainda tiver estoque guardado.";
     const linhaSelecionada = talhaoId !== "todos" ? linhas.find((l) => l.talhao.id === talhaoId) : null;
     return (React.createElement("div", { className: "pb-24" },
         React.createElement("div", { className: "bg-gradient-to-br from-[#3d4f36] to-[#242e1f] text-white px-4 pt-4 pb-5 rounded-b-3xl shadow-lg" },
@@ -6133,7 +6289,7 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
                             React.createElement("span", { className: "font-bold text-lg text-red-300" },
                                 "R$ ",
                                 fmtBR(custoPorSacaDesembolso, 2))))))),
-                React.createElement(BotoesPDF, { dadosRelatorio: dadosRelatorioGeral }),
+                React.createElement(ExportarRelatorio, { chave: "geral", titulo: "Relat\u00F3rio Financeiro Geral", subtitulo: "Ano " + ano, opcoes: opcoesGeral, observacao: observacaoGeral }),
                 (CATEGORIAS_DESPESA.some((c) => despesasPorCategoria[c] > 0) || CATEGORIAS_COMPRA.some((c) => comprasPorCategoria[c] > 0)) && (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-3" },
                     React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase mb-2" }, "Gasto por categoria"),
                     CATEGORIAS_DESPESA.filter((c) => despesasPorCategoria[c] > 0).length > 0 && (React.createElement(React.Fragment, null,
@@ -6146,6 +6302,8 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
                         CATEGORIAS_COMPRA.filter((c) => comprasPorCategoria[c] > 0).map((c) => (React.createElement("div", { key: c, className: "flex items-center justify-between py-1 text-sm" },
                             React.createElement("span", { className: "text-stone-600" }, c),
                             React.createElement("span", { className: "font-semibold text-[#a8442f]" }, "R$ ", fmtBR(comprasPorCategoria[c], 2))))))))),
+                React.createElement(ListaPrecosProdutos, { resumo: resumoComprasProd }),
+                React.createElement(ListaAplicadosProdutos, { resumo: resumoAplicados }),
                 React.createElement(GraficoSetorFinanceiro, { linhas: linhas, ano: ano }),
                 React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase px-1 mb-2" }, "Por talh\u00E3o"),
                 linhas.length === 0 && React.createElement("p", { className: "text-center text-stone-400 text-sm py-6" }, "Nenhum talh\u00E3o cadastrado ainda."),
@@ -6202,22 +6360,23 @@ function RelatorioDetalheTalhao({ linha, ano, compras }) {
         const un = d.unidadeProduto || "mL";
         produtoPorUnidade[un] = (produtoPorUnidade[un] || 0) + Number(d.quantidadeProduto);
     });
-    const dadosRelatorioTalhao = () => ({
-        titulo: "Relatório Financeiro — " + talhao.nome,
-        subtitulo: `Ano ${ano}`,
-        secoes: [
-            { titulo: "Resumo", linhas: [
-                    ["Gasto total", "R$ " + fmtBR(totalGasto, 2)],
-                    ["Receita total", "R$ " + fmtBR(totalReceita, 2)],
-                    ["Lucro", "R$ " + fmtBR(lucro, 2)],
-                    ["Margem de lucro", margem != null ? fmtBR(margem, 1) + "%" : "—"],
-                    ["Custo por saca (esperado)", custoPorSaca != null ? "R$ " + fmtBR(custoPorSaca, 2) + " (" + fmtBR(sacasEsperadas, 0) + " sacas)" : "—"],
-                ] },
-            { titulo: "Gasto por categoria", linhas: categoriasOrdenadas.map(([tipo, valor]) => [tipo, "R$ " + fmtBR(valor, 2)]) },
-            { titulo: `Despesas detalhadas (${todosGastos.length})`, linhas: todosGastos.map((g) => [g.descricao + " (" + g.tipo + ")", "R$ " + fmtBR(g.valor, 2)]) },
-            { titulo: `Receitas detalhadas (${rc.length})`, linhas: [...rc].sort((a, b) => (a.data < b.data ? 1 : -1)).map((r) => [r.descricao || "Receita", "R$ " + fmtBR(r.valorTotal, 2)]) },
-        ],
-    });
+    const aplicadosTalhao = resumirAplicadosPorProduto([{ talhao, ad, de }], compras);
+    const ordenaDataT = (arr) => [...arr].sort((a, b) => (a.data < b.data ? -1 : 1));
+    const opcoesTalhao = [
+        { id: "resumo", label: "Resumo (gasto, receita, lucro, margem)", gerar: () => ({ titulo: "Resumo", linhas: [
+                ["Gasto total", "R$ " + fmtBR(totalGasto, 2)],
+                ["Receita total", "R$ " + fmtBR(totalReceita, 2)],
+                ["Lucro", "R$ " + fmtBR(lucro, 2)],
+                ["Margem de lucro", margem != null ? fmtBR(margem, 1) + "%" : "—"],
+            ] }) },
+        { id: "custosaca", label: "Custo por saca", gerar: () => ({ titulo: "Custo por saca", linhas: custoPorSaca == null ? [] : [["Sacas esperadas", fmtBR(sacasEsperadas, 0)], ["Custo por saca (esperado)", "R$ " + fmtBR(custoPorSaca, 2)]] }) },
+        { id: "categoria", label: "Gasto por categoria", gerar: () => ({ titulo: "Gasto por categoria", linhas: categoriasOrdenadas.map(([tipo, valor]) => [tipo, "R$ " + fmtBR(valor, 2)]) }) },
+        { id: "aplicados", label: "Produtos aplicados (quantidade e custo médio)", gerar: () => ({ titulo: "Produtos aplicados", linhas: aplicadosTalhao.map((m) => [m.produto, m.custo > 0 ? "R$ " + fmtBR(m.custo, 2) : "—", m.categoria + " · " + m.n + (m.n === 1 ? " aplicação" : " aplicações") + (m.qtd > 0 ? " · " + numRel(m.qtd) + " " + m.un : "") + (m.precoUn != null ? " · custo médio R$ " + fmtBR(m.precoUn, 2) + "/" + m.un : "")]) }) },
+        { id: "adubdet", label: "Adubações aplicadas (lista completa)", gerar: () => ({ titulo: "Adubações aplicadas", linhas: ordenaDataT(ad).map((a) => [dataBRrel(a.data) + " · " + a.produto, a.custo ? "R$ " + fmtBR(Number(a.custo), 2) : "—", descreverAplicacao(a, talhao)]) }) },
+        { id: "defdet", label: "Defensivos/herbicidas aplicados (lista completa)", gerar: () => ({ titulo: "Defensivos aplicados", linhas: ordenaDataT(de).map((d) => [dataBRrel(d.data) + " · " + d.produto, d.custo ? "R$ " + fmtBR(Number(d.custo), 2) : "—", descreverAplicacao(d, talhao) + (d.carencia != null && d.carencia !== "" ? " · carência " + d.carencia + " dias" : "")]) }) },
+        { id: "despdet", label: "Despesas (lista completa)", gerar: () => ({ titulo: "Despesas detalhadas", linhas: ordenaDataT(todosGastos).map((g) => [dataBRrel(g.data) + " · " + g.descricao + " (" + g.tipo + ")", "R$ " + fmtBR(g.valor, 2)]) }) },
+        { id: "recdet", label: "Receitas (lista completa)", gerar: () => ({ titulo: "Receitas detalhadas", linhas: ordenaDataT(rc).map((r) => [dataBRrel(r.data) + " · " + (r.descricao || "Receita"), "R$ " + fmtBR(Number(r.valorTotal) || 0, 2), r.sacas ? numRel(r.sacas) + " sacas" + (Number(r.sacas) > 0 ? " · R$ " + fmtBR((Number(r.valorTotal) || 0) / Number(r.sacas), 2) + "/saca" : "") : ""]) }) },
+    ];
     return (React.createElement("div", { className: "space-y-3" },
         React.createElement("div", { className: "bg-[#33422e] text-white rounded-xl p-4 space-y-2" },
             React.createElement("p", { className: "text-[#cdd7c4] text-xs uppercase tracking-wide font-semibold" },
@@ -6249,7 +6408,8 @@ function RelatorioDetalheTalhao({ linha, ano, compras }) {
                 React.createElement("span", { className: "font-bold text-lg text-red-300" },
                     "R$ ",
                     fmtBR(custoPorSaca, 2))))),
-        React.createElement(BotoesPDF, { dadosRelatorio: dadosRelatorioTalhao }),
+        React.createElement(ExportarRelatorio, { chave: "talhao", titulo: "Relat\u00F3rio Financeiro \u2014 " + talhao.nome, subtitulo: "Ano " + ano, opcoes: opcoesTalhao }),
+        React.createElement(ListaAplicadosProdutos, { resumo: aplicadosTalhao }),
         categoriasOrdenadas.length > 0 && (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-3" },
             React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase mb-2" }, "Gasto por categoria"),
             categoriasOrdenadas.map(([tipo, valor]) => (React.createElement("div", { key: tipo, className: "flex items-center justify-between py-1 text-sm" },
