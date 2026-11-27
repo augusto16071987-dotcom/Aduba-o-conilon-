@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v177-custo-por-planta";
+const APP_VERSION = "build-2026-11-15-v178-relatorio-por-data";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -6149,13 +6149,31 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
         ...Object.values(despesas).flat().map(anoDe),
         ...compras.map(anoDe),
     ])).sort((a, b) => b - a);
-    const [ano, setAno] = useState(anoAtual);
+    const [anoSel, setAnoSel] = useState(anoAtual);
+    // filtro por data (de / até): quando preenchido, vale no lugar do ano
+    const [dtDe, setDtDe] = useState("");
+    const [dtAte, setDtAte] = useState("");
+    const periodoAtivo = !!(dtDe || dtAte);
+    const pIni = dtDe && dtAte && dtDe > dtAte ? dtAte : dtDe;
+    const pFim = dtDe && dtAte && dtDe > dtAte ? dtDe : dtAte;
+    const ano = periodoAtivo ? ((pIni ? dataBRrel(pIni) : "o in\u00EDcio") + " a " + (pFim ? dataBRrel(pFim) : "hoje")) : anoSel;
+    const noPeriodo = (item) => periodoAtivo ? ((!pIni || item.data >= pIni) && (!pFim || item.data <= pFim)) : anoDe(item) === anoSel;
+    const setAno = (a) => { setAnoSel(a); setDtDe(""); setDtAte(""); };
+    const isoLocal = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    const atalhoPeriodo = (tipo) => {
+        const hoje = new Date();
+        let a, b;
+        if (tipo === "mes") { a = new Date(hoje.getFullYear(), hoje.getMonth(), 1); b = hoje; }
+        else if (tipo === "mesPassado") { a = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1); b = new Date(hoje.getFullYear(), hoje.getMonth(), 0); }
+        else { a = new Date(hoje.getTime() - (tipo === "30" ? 29 : 89) * 86400000); b = hoje; }
+        setDtDe(isoLocal(a)); setDtAte(isoLocal(b));
+    };
     const [talhaoId, setTalhaoId] = useState("todos");
     const linhas = talhoes.map((t) => {
-        const ad = (adubacoes[t.id] || []).filter((x) => anoDe(x) === ano);
-        const de = (defensivos[t.id] || []).filter((x) => anoDe(x) === ano);
-        const rc = (receitas[t.id] || []).filter((x) => anoDe(x) === ano);
-        const ds = (despesas[t.id] || []).filter((x) => anoDe(x) === ano);
+        const ad = (adubacoes[t.id] || []).filter((x) => noPeriodo(x));
+        const de = (defensivos[t.id] || []).filter((x) => noPeriodo(x));
+        const rc = (receitas[t.id] || []).filter((x) => noPeriodo(x));
+        const ds = (despesas[t.id] || []).filter((x) => noPeriodo(x));
         const fin = calcularFinanceiro(ad, de, rc, ds);
         // sacas esperadas = produtividade (sc/ha) x área do talhão
         const sacasEsperadas = (Number(t.produtividade) || 0) * (Number(t.area) || 0);
@@ -6170,7 +6188,7 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
     const margemGeral = totalGeral.totalReceita > 0 ? (totalGeral.lucro / totalGeral.totalReceita) * 100 : null;
     const sacasEsperadasTotal = linhas.reduce((s, l) => s + l.sacasEsperadas, 0);
     const custoPorSacaGeral = sacasEsperadasTotal > 0 ? totalGeral.totalGasto / sacasEsperadasTotal : null;
-    const comprasDoAno = compras.filter((c) => anoDe(c) === ano);
+    const comprasDoAno = compras.filter((c) => noPeriodo(c));
     const totalComprasAno = comprasDoAno.reduce((s, c) => s + (Number(c.valorTotal) || 0), 0);
     // segunda visão do custo por saca: considera TUDO que já saiu do bolso
     // (compras do ano + despesas gerais), não só o que já foi aplicado no campo
@@ -6185,7 +6203,7 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
     const despesasPorCategoria = {};
     CATEGORIAS_DESPESA.forEach((c) => { despesasPorCategoria[c] = 0; });
     talhoes.forEach((t) => {
-        (despesas[t.id] || []).filter((d) => anoDe(d) === ano).forEach((d) => {
+        (despesas[t.id] || []).filter((d) => noPeriodo(d)).forEach((d) => {
             despesasPorCategoria[d.categoria] = (despesasPorCategoria[d.categoria] || 0) + (Number(d.valorTotal) || 0);
         });
     });
@@ -6241,9 +6259,23 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
                 React.createElement("span", { className: "flex items-center gap-1 text-xs text-stone-400 shrink-0" },
                     React.createElement(Icon, { name: "history", size: 13 }),
                     " Ano:"),
-                anos.map((a) => (React.createElement("button", { key: a, onClick: () => setAno(a), className: `px-3 py-1 rounded-full text-xs font-semibold shrink-0 ${ano === a ? "bg-[#33422e] text-white" : "bg-white text-stone-500 border border-stone-200"}` },
+                anos.map((a) => (React.createElement("button", { key: a, onClick: () => setAno(a), className: `px-3 py-1 rounded-full text-xs font-semibold shrink-0 ${(!periodoAtivo && anoSel === a) ? "bg-[#33422e] text-white" : "bg-white text-stone-500 border border-stone-200"}` },
                     a,
                     a === anoAtual ? " (atual)" : "")))),
+            React.createElement("div", { className: `rounded-xl p-3 mb-3 border ${periodoAtivo ? "bg-[#eef3e8] border-[#33422e]" : "bg-white border-stone-200"}` },
+                React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase mb-2" }, "Ou pesquisar por data"),
+                React.createElement("div", { className: "grid grid-cols-2 gap-2" },
+                    React.createElement("div", null,
+                        React.createElement("label", { className: "text-[11px] text-stone-500" }, "De"),
+                        React.createElement("input", { type: "date", className: inputCls, value: dtDe, onChange: (e) => setDtDe(e.target.value) })),
+                    React.createElement("div", null,
+                        React.createElement("label", { className: "text-[11px] text-stone-500" }, "At\u00E9"),
+                        React.createElement("input", { type: "date", className: inputCls, value: dtAte, onChange: (e) => setDtAte(e.target.value) }))),
+                React.createElement("div", { className: "flex gap-2 mt-2 overflow-x-auto pb-1" },
+                    [["mes", "Este m\u00EAs"], ["mesPassado", "M\u00EAs passado"], ["30", "\u00DAltimos 30 dias"], ["90", "\u00DAltimos 90 dias"]].map(([k, l]) => React.createElement("button", { key: k, type: "button", onClick: () => atalhoPeriodo(k), className: "px-3 py-1.5 rounded-full text-xs font-semibold shrink-0 bg-white text-[#33422e] border border-[#33422e]" }, l))),
+                periodoAtivo && React.createElement("div", { className: "flex items-center justify-between mt-2" },
+                    React.createElement("span", { className: "text-xs text-[#33422e] font-semibold" }, "Mostrando: " + ano),
+                    React.createElement("button", { type: "button", onClick: () => { setDtDe(""); setDtAte(""); }, className: "text-xs font-bold text-[#a8442f] border border-[#a8442f] rounded-lg px-3 py-1" }, "Limpar datas"))),
             React.createElement(Field, { label: "Talh\u00E3o" },
                 React.createElement("select", { className: inputCls, value: talhaoId, onChange: (e) => setTalhaoId(e.target.value) },
                     React.createElement("option", { value: "todos" }, "Todos os talh\u00F5es (vis\u00E3o geral)"),
@@ -6251,7 +6283,7 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
             talhaoId === "todos" ? (React.createElement(React.Fragment, null,
                 React.createElement("div", { className: "bg-[#33422e] text-white rounded-xl p-4 space-y-2 mb-4" },
                     React.createElement("p", { className: "text-[#cdd7c4] text-xs uppercase tracking-wide font-semibold" },
-                        "Total da lavoura em ",
+                        periodoAtivo ? "Total da lavoura de " : "Total da lavoura em ",
                         ano),
                     React.createElement("div", { className: "flex items-center justify-between" },
                         React.createElement("span", { className: "text-[#cdd7c4] text-sm" }, "Gasto total (aplicado nos talh\u00F5es)"),
@@ -6306,7 +6338,7 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
                             React.createElement("span", { className: "font-bold text-lg text-red-300" },
                                 "R$ ",
                                 fmtBR(custoPorSacaDesembolso, 2))))))),
-                React.createElement(ExportarRelatorio, { chave: "geral", titulo: "Relat\u00F3rio Financeiro Geral", subtitulo: "Ano " + ano, opcoes: opcoesGeral, observacao: observacaoGeral }),
+                React.createElement(ExportarRelatorio, { chave: "geral", titulo: "Relat\u00F3rio Financeiro Geral", subtitulo: (periodoAtivo ? "Per\u00EDodo " : "Ano ") + ano, opcoes: opcoesGeral, observacao: observacaoGeral }),
                 (CATEGORIAS_DESPESA.some((c) => despesasPorCategoria[c] > 0) || CATEGORIAS_COMPRA.some((c) => comprasPorCategoria[c] > 0)) && (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-3" },
                     React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase mb-2" }, "Gasto por categoria"),
                     CATEGORIAS_DESPESA.filter((c) => despesasPorCategoria[c] > 0).length > 0 && (React.createElement(React.Fragment, null,
@@ -6431,7 +6463,7 @@ function RelatorioDetalheTalhao({ linha, ano, compras }) {
                 React.createElement("span", { className: "font-bold text-lg text-red-300" },
                     "R$ ",
                     fmtBR(custoPorSaca, 2))))),
-        React.createElement(ExportarRelatorio, { chave: "talhao", titulo: "Relat\u00F3rio Financeiro \u2014 " + talhao.nome, subtitulo: "Ano " + ano, opcoes: opcoesTalhao }),
+        React.createElement(ExportarRelatorio, { chave: "talhao", titulo: "Relat\u00F3rio Financeiro \u2014 " + talhao.nome, subtitulo: (/^\d{4}$/.test(String(ano)) ? "Ano " : "Per\u00EDodo ") + ano, opcoes: opcoesTalhao }),
         React.createElement(ListaAplicadosProdutos, { resumo: aplicadosTalhao }),
         categoriasOrdenadas.length > 0 && (React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-3" },
             React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase mb-2" }, "Gasto por categoria"),
