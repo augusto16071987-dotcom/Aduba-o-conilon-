@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v172-ciclo-colheita";
+const APP_VERSION = "build-2026-11-15-v173-converte-unidade";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -4883,6 +4883,22 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
     };
     const talhoesAlvo = todosOsTalhoes ? talhoes.map((t) => t.id) : [talhaoId];
     const talhaoRef = talhoes.find((t) => t.id === talhoesAlvo[0]);
+    // Trocar a unidade já converte o número digitado pra nova unidade
+    // (usa a área e o nº de plantas do(s) talhão(ões) escolhido(s))
+    const trocarUnidade = (i, nova) => setItens((prev) => prev.map((it, idx) => {
+        if (idx !== i) return it;
+        const alvos = talhoesAlvo.map((tid) => talhoes.find((x) => x.id === tid)).filter(Boolean);
+        const area = alvos.reduce((a, t) => a + (Number(t.area) || 0), 0);
+        const plantas = alvos.reduce((a, t) => a + (Number(t.numPlantas) || 0), 0);
+        const peso = Number(it.pesoSacoRef) || 50;
+        const q = Number(String(it.quantidade).replace(",", "."));
+        if (!it.quantidade || !isFinite(q)) return { ...it, unidade: nova };
+        const fator = (u) => (u === "kg" || u === "L") ? 1 : u === "sacos" ? peso : (u === "kg/ha" || u === "L/ha") ? area : (u === "g/planta" || u === "mL/planta") ? plantas / 1000 : 0;
+        const fo = fator(it.unidade), fd = fator(nova);
+        if (!(fo > 0) || !(fd > 0)) return { ...it, unidade: nova };
+        const novoValor = q * fo / fd;
+        return { ...it, unidade: nova, quantidade: String(Math.round(novoValor * 100) / 100) };
+    }));
     const anoDaData = talhaoRef ? cicloDaData(talhaoRef, data) : Number(String(data).slice(0, 4));
     const fimsDosAlvos = talhoesAlvo.map((tid) => { const t = talhoes.find((x) => x.id === tid); return t ? fimCicloDoTalhao(t, cicloDaData(t, data)) : null; }).filter(Boolean).sort();
     const fimPadrao = fimsDosAlvos[0] || "";
@@ -4959,7 +4975,7 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
                     React.createElement(Field, { label: it.unidade === "g/planta" || it.unidade === "mL/planta" ? "Dose (por planta)" : it.unidade === "kg/ha" || it.unidade === "L/ha" ? "Dose (por hectare)" : "Quantidade prevista (opcional)" },
                         React.createElement(NumInput, { placeholder: "Ex: 5", value: it.quantidade, onChange: (e) => atualizarItem(i, "quantidade", e.target.value) })),
                     React.createElement(Field, { label: "Unidade" },
-                        React.createElement("select", { className: inputCls, value: it.unidade, onChange: (e) => atualizarItem(i, "unidade", e.target.value) },
+                        React.createElement("select", { className: inputCls, value: it.unidade, onChange: (e) => trocarUnidade(i, e.target.value) },
                             React.createElement("option", { value: "kg" }, "kg (total)"),
                             React.createElement("option", { value: "L" }, "litros (total)"),
                             React.createElement("option", { value: "sacos" }, "sacos"),
