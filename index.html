@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v178-relatorio-por-data";
+const APP_VERSION = "build-2026-11-15-v179-aviso-atualizacao";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -918,6 +918,64 @@ async function consultarStatusAssinatura(codigo) {
    por codigo, entao mostramos o passo a passo guiado.
 ------------------------------------------------------------------*/
 try { if ("serviceWorker" in navigator) window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => { }); }); } catch (e) { }
+/*------------------------------------------------------------------
+   Aviso de nova versão: ao abrir o app (e ao voltar pra ele), olha o
+   começo do index.html no servidor. Se a versão de lá for diferente da
+   que está rodando, mostra uma faixa no topo com o botão "Atualizar".
+   Só lê os primeiros KB do arquivo (gasta quase nada de internet).
+------------------------------------------------------------------*/
+(function () {
+    try {
+        if (!/^https?:$/.test(location.protocol)) return;
+        let mostrando = false, ultima = 0;
+        const mostrar = (nova) => {
+            if (mostrando || document.getElementById("nc-aviso-versao")) return;
+            mostrando = true;
+            const box = document.createElement("div");
+            box.id = "nc-aviso-versao";
+            box.setAttribute("style", "position:fixed;top:0;left:0;right:0;z-index:99999;background:#33422e;color:#fff;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;display:flex;align-items:center;gap:10px;font-family:system-ui,sans-serif;font-size:14px;box-shadow:0 2px 10px rgba(0,0,0,.35)");
+            const txt = document.createElement("div");
+            txt.setAttribute("style", "flex:1;line-height:1.25");
+            txt.innerHTML = "<b>🔄 Nova versão disponível</b><br><span style=\"opacity:.85;font-size:12px\">Atualize para ter as novidades. Seus dados ficam guardados.</span>";
+            const bt = document.createElement("button");
+            bt.textContent = "Atualizar";
+            bt.setAttribute("style", "background:#f4c95d;color:#33422e;border:0;border-radius:10px;padding:10px 14px;font-weight:800;font-size:14px");
+            const x = document.createElement("button");
+            x.textContent = "✕";
+            x.setAttribute("aria-label", "Agora não");
+            x.setAttribute("style", "background:transparent;color:#fff;border:0;font-size:18px;padding:6px");
+            bt.onclick = async () => {
+                bt.textContent = "Atualizando…"; bt.disabled = true;
+                try { await fetch(location.href, { cache: "reload" }); } catch (e) { }
+                try { const reg = await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } catch (e) { }
+                location.reload();
+            };
+            x.onclick = () => { try { sessionStorage.setItem("nc_aviso_versao_ok", nova); } catch (e) { } box.remove(); mostrando = false; };
+            box.appendChild(txt); box.appendChild(bt); box.appendChild(x);
+            document.body.appendChild(box);
+        };
+        const checar = async (forcar) => {
+            if (mostrando) return;
+            const agora = Date.now();
+            if (!forcar && agora - ultima < 10 * 60 * 1000) return;
+            ultima = agora;
+            try {
+                const url = new URL("index.html", location.href); url.searchParams.set("_v", String(agora));
+                const r = await fetch(url.toString(), { cache: "no-store", headers: { Range: "bytes=0-20000" } });
+                if (!r.ok) return;
+                const t = await r.text();
+                const m = t.match(/const APP_VERSION = "([^"]+)"/);
+                if (!m || m[1] === APP_VERSION) return;
+                let dispensada = ""; try { dispensada = sessionStorage.getItem("nc_aviso_versao_ok") || ""; } catch (e) { }
+                if (dispensada === m[1]) return;
+                mostrar(m[1]);
+            } catch (e) { }
+        };
+        window.addEventListener("load", () => setTimeout(() => checar(true), 3000));
+        document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checar(false); });
+        setInterval(() => checar(false), 30 * 60 * 1000);
+    } catch (e) { }
+})();
 let __eventoInstalar = null;
 try {
     window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); __eventoInstalar = e; window.dispatchEvent(new Event("nutricafe-pode-instalar")); });
