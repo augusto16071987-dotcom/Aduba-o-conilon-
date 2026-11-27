@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v171-ciclo-frequencia";
+const APP_VERSION = "build-2026-11-15-v172-ciclo-colheita";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -552,9 +552,37 @@ function calcularPrevisto(agendamentosDoTalhao, areaHa, numPlantas) {
    ano do ciclo.
 ------------------------------------------------------------------*/
 const anoDeItem = (item) => Number(String(item.data).slice(0, 4));
-const doAno = (lista, ano) => (lista || []).filter((x) => anoDeItem(x) === ano);
 function fimCicloDoTalhao(talhao, ano) {
     return talhao && talhao.fimAdubacao ? (talhao.fimAdubacao[String(ano)] || null) : null;
+}
+/* O "ano" do tratamento é de uma colheita até a outra, então o ciclo
+   rotulado 2026 pode terminar em 2027. Período do ciclo N: começa no dia
+   seguinte ao fim do ciclo N-1 (ou 1º de janeiro de N, se não houver) e
+   vai até a data final de N (ou 31 de dezembro de N, se não houver). */
+function periodoCiclo(talhao, ano) {
+    const ant = fimCicloDoTalhao(talhao, ano - 1);
+    return { ini: ant ? somarDiasISO(ant, 1) : ano + "-01-01", fim: fimCicloDoTalhao(talhao, ano) || ano + "-12-31" };
+}
+function cicloDaData(talhao, iso) {
+    const y = Number(String(iso).slice(0, 4));
+    for (const c of [y - 1, y, y + 1]) {
+        const per = periodoCiclo(talhao, c);
+        if (iso >= per.ini && iso <= per.fim) return c;
+    }
+    return y;
+}
+const noCiclo = (lista, talhao, ano) => (lista || []).filter((x) => cicloDaData(talhao, x.data) === ano);
+function cicloAtualDoTalhao(talhao) { return cicloDaData(talhao, new Date().toISOString().slice(0, 10)); }
+/* Ciclo em pausa: a data final já passou e ainda não há análise de solo
+   nova (datada depois do fim). */
+function cicloEmPausa(talhao, analisesDoTalhao) {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const y = new Date().getFullYear();
+    for (const c of [y, y - 1]) {
+        const fim = fimCicloDoTalhao(talhao, c);
+        if (fim && hoje > fim && !(analisesDoTalhao || []).some((a) => a.data > fim)) return c;
+    }
+    return null;
 }
 function dataBRcurta(iso) {
     if (!iso) return "";
@@ -599,8 +627,8 @@ function faltaDoCiclo(talhao, analisesDoTalhao, adubacoesDoTalhao, agendamentosD
     const r = calcularRecomendacao(talhao, ultima, tabelas);
     if (!r || r.erroExtrator || !r.total) return { ok: false, motivo: "sem_recomendacao" };
     const area = Number(talhao.area) || 0, plantas = Number(talhao.numPlantas) || 0;
-    const aplicado = calcularAplicado(doAno(adubacoesDoTalhao, ano), area, plantas);
-    const previsto = calcularPrevisto(doAno(agendamentosDoTalhao, ano), area, plantas);
+    const aplicado = calcularAplicado(noCiclo(adubacoesDoTalhao, talhao, ano), area, plantas);
+    const previsto = calcularPrevisto(noCiclo(agendamentosDoTalhao, talhao, ano), area, plantas);
     const falta = {}, meta = {};
     ["n", "p2o5", "k2o", "s", "zn", "cu", "mn", "b"].forEach((k) => {
         meta[k] = Number(r.total[k]) || 0;
@@ -3977,9 +4005,9 @@ function CartaoRecomendacao({ talhao, talhoes, analise, adubacoes, agendamentos,
             React.createElement("span", null,
                 "A tabela ", r.tabela.nome, " precisa de um laudo pelo m\u00E9todo ", nomeExtrator(r.extratorEsperado), ", mas a \u00FAltima an\u00E1lise cadastrada foi marcada como ", nomeExtrator(r.extratorInformado), ". Edite a an\u00E1lise de solo e ajuste o campo \"M\u00E9todo do laborat\u00F3rio\", ou cadastre uma nova an\u00E1lise com o m\u00E9todo certo.")));
     }
-    const anoCiclo = new Date().getFullYear();
-    const aplicado = calcularAplicado(doAno(adubacoes, anoCiclo), talhao.area, Number(talhao.numPlantas) || 0);
-    const previsto = calcularPrevisto(doAno(agendamentos, anoCiclo), talhao.area, Number(talhao.numPlantas) || 0);
+    const anoCiclo = cicloAtualDoTalhao(talhao);
+    const aplicado = calcularAplicado(noCiclo(adubacoes, talhao, anoCiclo), talhao.area, Number(talhao.numPlantas) || 0);
+    const previsto = calcularPrevisto(noCiclo(agendamentos, talhao, anoCiclo), talhao.area, Number(talhao.numPlantas) || 0);
     const linhaMicro = (label, valorAnalise, porHa, total) => (porHa === 0 && valorAnalise != null) ? (React.createElement("div", { className: "flex items-center justify-between py-2 border-b border-stone-100 last:border-0" },
         React.createElement("span", { className: "text-stone-600 text-sm" }, label),
         React.createElement("span", { className: "text-right" },
@@ -4116,12 +4144,14 @@ function FimCicloModal({ talhao, talhoes, ano, onClose, onSalvar }) {
     const [data, setData] = useState(atual || (ano + "-12-15"));
     const [todos, setTodos] = useState((talhoes || []).length > 1);
     const ids = todos ? talhoes.map((t) => t.id) : [talhao.id];
-    const valido = data && String(data).slice(0, 4) === String(ano);
+    const per = periodoCiclo(talhao, ano);
+    const valido = !!data && data >= per.ini && data <= (Number(ano) + 2) + "-12-31";
     return React.createElement(Modal, { title: "Fim da adubação de " + ano, onClose },
         React.createElement("p", { className: "text-sm text-stone-600 mb-3" }, "Escolha o \u00FAltimo dia de aplica\u00E7\u00E3o de adubo deste ano. Depois dessa data vem a pausa: colheita, uma nova an\u00E1lise de solo e o in\u00EDcio do pr\u00F3ximo ano de tratamento."),
         React.createElement(Field, { label: "Data final da adubação" },
             React.createElement("input", { type: "date", className: inputCls, value: data, onChange: (e) => setData(e.target.value) })),
-        !valido && React.createElement("p", { className: "text-xs text-[#a8442f] -mt-2 mb-3" }, "A data precisa ser de " + ano + "."),
+        React.createElement("p", { className: "text-[11px] text-stone-500 -mt-2 mb-3" }, "O ano de tratamento vai de uma colheita at\u00E9 a outra, ent\u00E3o a data pode cair no ano seguinte (ex.: 30/04/" + (Number(ano) + 1) + ")."),
+        !valido && !!data && React.createElement("p", { className: "text-xs text-[#a8442f] -mt-2 mb-3" }, "A data precisa ser depois de " + dataBRcurta(per.ini) + " (in\u00EDcio deste ciclo)."),
         (talhoes || []).length > 1 && (React.createElement("label", { className: "flex items-center gap-2 mb-3 text-sm text-stone-700 bg-[#f2ece0] rounded-lg px-3 py-2" },
             React.createElement("input", { type: "checkbox", checked: todos, onChange: (e) => setTodos(e.target.checked), className: "w-4 h-4 accent-[#33422e]" }),
             "Usar a mesma data nos " + talhoes.length + " talh\u00F5es")),
@@ -4129,7 +4159,7 @@ function FimCicloModal({ talhao, talhoes, ano, onClose, onSalvar }) {
             React.createElement(Icon, { name: "check", size: 18 }), " Salvar data final"),
         atual && React.createElement("button", { type: "button", onClick: () => onSalvar(ids, ano, null), className: "w-full mt-2 text-sm font-semibold text-[#a8442f] py-2" }, "Remover a data final"));
 }
-function FaixaCiclo({ talhao, ano, onEditar, onNovaAnalise }) {
+function FaixaCiclo({ talhao, ano, analises, onEditar, onNovaAnalise }) {
     const fim = fimCicloDoTalhao(talhao, ano);
     const hojeISO = new Date().toISOString().slice(0, 10);
     const anoHoje = new Date().getFullYear();
@@ -4137,12 +4167,12 @@ function FaixaCiclo({ talhao, ano, onEditar, onNovaAnalise }) {
         return React.createElement("button", { type: "button", onClick: onEditar, className: "w-full flex items-center justify-center gap-2 border border-dashed border-[#9fb08f] text-[#33422e] rounded-xl py-2 text-xs font-semibold mb-3" },
             "\uD83C\uDFC1 Definir a data final da aduba\u00E7\u00E3o de " + ano);
     }
-    const encerrado = hojeISO > fim && ano === anoHoje;
+    const encerrado = hojeISO > fim && !(analises || []).some((a) => a.data > fim);
     const dias = Math.round((new Date(fim + "T12:00:00") - new Date(hojeISO + "T12:00:00")) / 86400000);
     return React.createElement("div", { className: "mb-3" },
         React.createElement("div", { className: "flex items-center justify-between gap-2 bg-white rounded-xl border border-stone-200 px-3 py-2" },
             React.createElement("span", { className: "text-xs text-stone-600" }, "\uD83C\uDFC1 Adubação de " + ano + " vai até ", React.createElement("b", null, dataBRcurta(fim)),
-                !encerrado && ano === anoHoje && dias >= 0 ? " (faltam " + dias + (dias === 1 ? " dia)" : " dias)") : ""),
+                dias >= 0 && cicloAtualDoTalhao(talhao) === ano ? " (faltam " + dias + (dias === 1 ? " dia)" : " dias)") : ""),
             React.createElement("button", { type: "button", onClick: onEditar, className: "text-xs font-semibold text-[#33422e] underline shrink-0" }, "Alterar")),
         encerrado && React.createElement("div", { className: "mt-2 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800" },
             React.createElement("p", { className: "font-semibold mb-1" }, "Ciclo de " + ano + " encerrado em " + dataBRcurta(fim)),
@@ -4162,13 +4192,14 @@ function TalhaoDetail({ talhao, talhoes, analises, adubacoes, agendamentos, ocor
     const [editAdubacao, setEditAdubacao] = useState(null);
     const [showDespesaForm, setShowDespesaForm] = useState(false);
     const [editDespesa, setEditDespesa] = useState(null);
-    const anoAtual = new Date().getFullYear();
-    const anoDe = (item) => Number(String(item.data).slice(0, 4));
+    const anoAtual = cicloAtualDoTalhao(talhao);
+    const anoDe = (item) => cicloDaData(talhao, item.data);
     const todosAnos = Array.from(new Set([
         anoAtual,
         ...analises.map(anoDe), ...adubacoes.map(anoDe), ...ocorrencias.map(anoDe), ...defensivos.map(anoDe), ...despesas.map(anoDe),
     ])).sort((a, b) => b - a);
     const [anoSelecionado, setAnoSelecionado] = useState(anoAtual);
+    const anoFaixaRec = cicloEmPausa(talhao, analises) || anoAtual;
     const analisesDoAno = analises.filter((a) => anoDe(a) === anoSelecionado);
     const adubacoesDoAno = adubacoes.filter((a) => anoDe(a) === anoSelecionado);
     const ocorrenciasDoAno = ocorrencias.filter((o) => anoDe(o) === anoSelecionado);
@@ -4223,8 +4254,8 @@ function TalhaoDetail({ talhao, talhoes, analises, adubacoes, agendamentos, ocor
                 todosAnos.map((ano) => (React.createElement("button", { key: ano, onClick: () => setAnoSelecionado(ano), className: `px-3 py-1 rounded-full text-xs font-semibold shrink-0 ${anoSelecionado === ano ? "bg-[#33422e] text-white" : "bg-white text-stone-500 border border-stone-200"}` },
                     ano,
                     ano === anoAtual ? " (atual)" : ""))))),
-            tab !== "recomendacao" && React.createElement(FaixaCiclo, { talhao: talhao, ano: anoSelecionado, onEditar: () => setShowFimCiclo(true), onNovaAnalise: tab === "analises" ? () => setShowAnaliseForm(true) : (() => { setTab("analises"); setShowAnaliseForm(true); }) }),
-            tab === "recomendacao" && React.createElement(FaixaCiclo, { talhao: talhao, ano: new Date().getFullYear(), onEditar: () => setShowFimCiclo(true), onNovaAnalise: () => { setTab("analises"); setShowAnaliseForm(true); } }),
+            tab !== "recomendacao" && React.createElement(FaixaCiclo, { talhao: talhao, ano: anoSelecionado, analises: analises, onEditar: () => setShowFimCiclo(true), onNovaAnalise: tab === "analises" ? () => setShowAnaliseForm(true) : (() => { setTab("analises"); setShowAnaliseForm(true); }) }),
+            tab === "recomendacao" && React.createElement(FaixaCiclo, { talhao: talhao, ano: anoFaixaRec, analises: analises, onEditar: () => setShowFimCiclo(true), onNovaAnalise: () => { setTab("analises"); setShowAnaliseForm(true); } }),
             tab === "recomendacao" && React.createElement(CartaoRecomendacao, { talhao: talhao, talhoes: talhoes, analise: ultimaAnalise, adubacoes: adubacoes, agendamentos: agendamentos, tabelas: tabelas, onAddAdubacaoEmLote: onAddAdubacaoEmLote }),
             tab === "analises" && (React.createElement("div", { className: "space-y-3" },
                 React.createElement("button", { onClick: () => setShowAnaliseForm(true), className: "w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#9fb08f] text-[#33422e] rounded-xl py-3 text-sm font-semibold" },
@@ -4321,7 +4352,7 @@ function TalhaoDetail({ talhao, talhoes, analises, adubacoes, agendamentos, ocor
                         despesasExpandidas[d.id] ? "Ocultar detalhes \u25B2" : "Ver detalhes \u25BC")),
                     d.obs && despesasExpandidas[d.id] && React.createElement("p", { className: "text-xs text-stone-400 italic mt-1" }, d.obs)))))),
             tab !== "recomendacao" && (React.createElement(BotaoExcluirTalhao, { talhao, onDeleteTalhao }))),
-        showFimCiclo && (React.createElement(FimCicloModal, { talhao: talhao, talhoes: talhoes, ano: tab === "recomendacao" ? new Date().getFullYear() : anoSelecionado, onClose: () => setShowFimCiclo(false), onSalvar: (ids, ano, dataISO) => { onSalvarFimCiclo(ids, ano, dataISO); setShowFimCiclo(false); } })),
+        showFimCiclo && (React.createElement(FimCicloModal, { talhao: talhao, talhoes: talhoes, ano: tab === "recomendacao" ? anoFaixaRec : anoSelecionado, onClose: () => setShowFimCiclo(false), onSalvar: (ids, ano, dataISO) => { onSalvarFimCiclo(ids, ano, dataISO); setShowFimCiclo(false); } })),
         showAnaliseForm && (React.createElement(AnaliseForm, { onClose: () => setShowAnaliseForm(false), onSave: (a) => { onAddAnalise(talhao.id, a); setShowAnaliseForm(false); } })),
         editAnalise && (React.createElement(AnaliseForm, { initial: editAnalise, onClose: () => setEditAnalise(null), onSave: (a) => { onUpdateAnalise(a); setEditAnalise(null); } })),
         showAdubacaoForm && (React.createElement(AdubacaoForm, { compras: comprasGlobais, talhao: talhao, talhoes: talhoes, onClose: () => setShowAdubacaoForm(false), onSave: (a) => {
@@ -4851,8 +4882,9 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
         return base;
     };
     const talhoesAlvo = todosOsTalhoes ? talhoes.map((t) => t.id) : [talhaoId];
-    const anoDaData = Number(String(data).slice(0, 4));
-    const fimsDosAlvos = talhoesAlvo.map((tid) => fimCicloDoTalhao(talhoes.find((t) => t.id === tid), anoDaData)).filter(Boolean).sort();
+    const talhaoRef = talhoes.find((t) => t.id === talhoesAlvo[0]);
+    const anoDaData = talhaoRef ? cicloDaData(talhaoRef, data) : Number(String(data).slice(0, 4));
+    const fimsDosAlvos = talhoesAlvo.map((tid) => { const t = talhoes.find((x) => x.id === tid); return t ? fimCicloDoTalhao(t, cicloDaData(t, data)) : null; }).filter(Boolean).sort();
     const fimPadrao = fimsDosAlvos[0] || "";
     const dataFimEf = dataFim !== null ? dataFim : fimPadrao;
     const todasDatas = freq !== "uma" && !initial ? gerarDatasRepetidas(data, dataFimEf, freq) : [data, ...datasExtras.filter((d) => d)];
@@ -4860,7 +4892,7 @@ function AgendamentoForm({ onSave, onClose, initial, dataInicial, talhoes, compr
     const sugestaoAtiva = !initial && temProduto && forma !== "defensivo" && !!tabelas;
     const faltasAlvo = sugestaoAtiva ? talhoesAlvo.map((tid) => {
         const t = talhoes.find((x) => x.id === tid);
-        return t ? { t, f: faltaDoCiclo(t, (analises || {})[tid], (adubacoes || {})[tid], (agendamentos || {})[tid], tabelas, anoDaData) } : null;
+        return t ? { t, f: faltaDoCiclo(t, (analises || {})[tid], (adubacoes || {})[tid], (agendamentos || {})[tid], tabelas, cicloDaData(t, data)) } : null;
     }).filter(Boolean) : [];
     const okFaltas = faltasAlvo.filter((x) => x.f.ok);
     const semAnaliseQtd = faltasAlvo.length - okFaltas.length;
