@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v175-relatorio-sem-irrigacao";
+const APP_VERSION = "build-2026-11-15-v176-botoes-relatorio";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -2261,11 +2261,10 @@ function ExportarRelatorio({ chave, titulo, subtitulo, opcoes, observacao }) {
     };
     return React.createElement("div", { className: "space-y-2" },
         React.createElement("div", { className: "bg-white rounded-2xl shadow-sm p-3" },
-            React.createElement("div", { className: "flex items-center justify-between mb-1" },
-                React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase" }, "O que vai no PDF (" + qtdMarcados + " de " + opcoes.length + ")"),
-                React.createElement("div", { className: "flex gap-3 text-xs font-semibold text-[#33422e]" },
-                    React.createElement("button", { type: "button", onClick: () => marcarTodos(true) }, "Marcar tudo"),
-                    React.createElement("button", { type: "button", onClick: () => marcarTodos(false) }, "Limpar"))),
+            React.createElement("p", { className: "text-xs font-semibold tracking-wide text-stone-500 uppercase mb-2" }, "O que vai no PDF (" + qtdMarcados + " de " + opcoes.length + ")"),
+            React.createElement("div", { className: "grid grid-cols-2 gap-2 mb-2" },
+                React.createElement("button", { type: "button", onClick: () => marcarTodos(true), className: "flex items-center justify-center gap-1.5 bg-[#33422e] text-white rounded-lg py-3 text-sm font-bold shadow-sm active:bg-[#252f20]" }, "\u2714 Marcar tudo"),
+                React.createElement("button", { type: "button", onClick: () => marcarTodos(false), className: "flex items-center justify-center gap-1.5 bg-[#fbe9e6] text-[#a8442f] border-2 border-[#a8442f] rounded-lg py-3 text-sm font-bold active:bg-[#f3d3cd]" }, "\u2716 Limpar")),
             opcoes.map((o) => React.createElement("label", { key: o.id, className: "flex items-center gap-3 py-2 border-t border-stone-100 first:border-t-0 text-sm text-stone-700" },
                 React.createElement("input", { type: "checkbox", checked: marcado(o), onChange: () => alternar(o), className: "w-5 h-5 accent-[#33422e] shrink-0" }),
                 o.label))),
