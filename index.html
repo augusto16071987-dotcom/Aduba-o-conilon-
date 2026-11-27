@@ -45,7 +45,7 @@
 <script>
 "use strict";
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const APP_VERSION = "build-2026-11-15-v176-botoes-relatorio";
+const APP_VERSION = "build-2026-11-15-v177-custo-por-planta";
 const APP_UPDATED_AT = "08/11/2026";
 const APP_VERSION_DISPLAY = "NutriCaf\u00E9 " + (APP_VERSION.match(/v\d+/) || ["v?"])[0] + " \u00B7 Atualizado em " + APP_UPDATED_AT + " \u00B7 \u00A9 2026";
 /* ---------------------------------------------------------------
@@ -6177,6 +6177,11 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
     const totalDespesasGerais = linhas.reduce((s, l) => s + l.ds.filter((d) => !d.baixaEstoque).reduce((x, d) => x + (Number(d.valorTotal) || 0), 0), 0);
     const desembolsoTotal = totalComprasAno + totalDespesasGerais;
     const custoPorSacaDesembolso = sacasEsperadasTotal > 0 ? desembolsoTotal / sacasEsperadasTotal : null;
+    // sem produção esperada (0 sacas): mostra o custo por planta
+    const plantasTotal = linhas.reduce((x, l) => x + (Number(l.talhao.numPlantas) || 0), 0);
+    const usaPlanta = !(sacasEsperadasTotal > 0) && plantasTotal > 0;
+    const custoPorPlantaGeral = plantasTotal > 0 ? totalGeral.totalGasto / plantasTotal : null;
+    const custoPorPlantaDesembolso = plantasTotal > 0 ? desembolsoTotal / plantasTotal : null;
     const despesasPorCategoria = {};
     CATEGORIAS_DESPESA.forEach((c) => { despesasPorCategoria[c] = 0; });
     talhoes.forEach((t) => {
@@ -6202,13 +6207,13 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
                 ["Despesas gerais", "R$ " + fmtBR(totalDespesasGerais, 2)],
                 ["Total desembolsado (compras + despesas)", "R$ " + fmtBR(desembolsoTotal, 2)],
             ] }) },
-        { id: "custosaca", label: "Custo por saca", gerar: () => ({ titulo: "Custo por saca", linhas: custoPorSacaGeral == null ? [] : [
+        { id: "custosaca", label: "Custo por saca (ou por planta, se n\u00E3o houver produ\u00E7\u00E3o esperada)", gerar: () => usaPlanta ? ({ titulo: "Custo por planta", linhas: [["Plantas (total)", fmtBR(plantasTotal, 0)], ["J\u00E1 aplicado no campo", "R$ " + fmtBR(custoPorPlantaGeral, 2) + " por planta"], ["Total desembolsado", "R$ " + fmtBR(custoPorPlantaDesembolso, 2) + " por planta"]] }) : ({ titulo: "Custo por saca", linhas: custoPorSacaGeral == null ? [] : [
                 ["Sacas esperadas", fmtBR(sacasEsperadasTotal, 0)],
                 ["Já aplicado no campo", "R$ " + fmtBR(custoPorSacaGeral, 2)],
                 ["Total desembolsado", custoPorSacaDesembolso != null ? "R$ " + fmtBR(custoPorSacaDesembolso, 2) : "—"],
             ] }) },
         { id: "grafico", label: "Gráfico receita x despesa por setor", grafico: () => [...linhas].sort((a, b) => b.totalGasto - a.totalGasto).map((l) => ({ nome: l.talhao.nome, receita: l.totalReceita, despesa: l.totalGasto })) },
-        { id: "setores", label: "Resumo por setor (talhão)", gerar: () => ({ titulo: "Por setor (talhão)", linhas: [...linhas].sort((a, b) => b.totalGasto - a.totalGasto).map((l) => [l.talhao.nome, "Lucro R$ " + fmtBR(l.lucro, 2), "Receita R$ " + fmtBR(l.totalReceita, 2) + " · Despesa R$ " + fmtBR(l.totalGasto, 2) + (l.margem != null ? " · Margem " + fmtBR(l.margem, 1) + "%" : "") + (l.custoPorSaca != null ? " · Custo/saca R$ " + fmtBR(l.custoPorSaca, 2) : "")]) }) },
+        { id: "setores", label: "Resumo por setor (talhão)", gerar: () => ({ titulo: "Por setor (talhão)", linhas: [...linhas].sort((a, b) => b.totalGasto - a.totalGasto).map((l) => [l.talhao.nome, "Lucro R$ " + fmtBR(l.lucro, 2), "Receita R$ " + fmtBR(l.totalReceita, 2) + " · Despesa R$ " + fmtBR(l.totalGasto, 2) + (l.margem != null ? " · Margem " + fmtBR(l.margem, 1) + "%" : "") + (l.custoPorSaca != null ? " · Custo/saca R$ " + fmtBR(l.custoPorSaca, 2) : "") + (l.custoPorSaca == null && Number(l.talhao.numPlantas) > 0 ? " \u00B7 Custo/planta R$ " + fmtBR(l.totalGasto / Number(l.talhao.numPlantas), 2) : "")]) }) },
         { id: "despcat", label: "Despesas gerais por categoria", gerar: () => ({ titulo: "Despesas gerais por categoria", linhas: CATEGORIAS_DESPESA.filter((c) => despesasPorCategoria[c] > 0).map((c) => [c, "R$ " + fmtBR(despesasPorCategoria[c], 2)]) }) },
         { id: "compcat", label: "Compras por categoria", gerar: () => ({ titulo: "Compras por categoria", linhas: CATEGORIAS_COMPRA.filter((c) => comprasPorCategoria[c] > 0).map((c) => [c, "R$ " + fmtBR(comprasPorCategoria[c], 2)]) }) },
         { id: "precos", label: "Preço detalhado por produto (médio, último, menor, maior)", gerar: () => ({ titulo: "Preço por produto (compras de " + ano + ")", linhas: resumoComprasProd.map((m) => [m.produto, "R$ " + fmtBR(m.total, 2), m.categoria + " · " + m.n + (m.n === 1 ? " compra" : " compras") + " · " + numRel(m.qtd) + " " + m.un + (m.medio != null ? " · médio R$ " + fmtBR(m.medio, 2) + "/" + m.un + " · último R$ " + fmtBR(m.ultimo, 2) + " (" + dataBRrel(m.ultimaData) + ")" + (m.n > 1 && m.min !== m.max ? " · menor R$ " + fmtBR(m.min, 2) + " · maior R$ " + fmtBR(m.max, 2) : "") : "")]) }) },
@@ -6271,6 +6276,18 @@ function RelatorioFinanceiroScreen({ talhoes, adubacoes, ocorrencias, defensivos
                         React.createElement("span", { className: "font-bold text-red-300" },
                             "R$ ",
                             fmtBR(totalComprasAno, 2))),
+                    usaPlanta && (React.createElement(React.Fragment, null,
+                        React.createElement("div", { className: "border-t border-white/20 pt-2 mt-1" },
+                            React.createElement("p", { className: "text-[10px] text-[#9fae93] uppercase tracking-wide font-semibold mb-1" },
+                                "Custo por planta \u00B7 " + fmtBR(plantasTotal, 0) + " plantas \u00B7 sem produ\u00E7\u00E3o esperada")),
+                        React.createElement("div", { className: "flex items-center justify-between" },
+                            React.createElement("span", { className: "text-[#cdd7c4] text-sm" }, "J\u00E1 aplicado no campo",
+                                React.createElement("span", { className: "block text-[10px] text-[#9fae93]" }, "s\u00F3 o que foi pro talh\u00E3o")),
+                            React.createElement("span", { className: "font-bold text-lg text-red-300" }, "R$ " + fmtBR(custoPorPlantaGeral, 2))),
+                        React.createElement("div", { className: "flex items-center justify-between" },
+                            React.createElement("span", { className: "text-[#cdd7c4] text-sm" }, "Total desembolsado",
+                                React.createElement("span", { className: "block text-[10px] text-[#9fae93]" }, "compras + despesas, mesmo em estoque")),
+                            React.createElement("span", { className: "font-bold text-lg text-red-300" }, "R$ " + fmtBR(custoPorPlantaDesembolso, 2))))),
                     custoPorSacaGeral != null && (React.createElement(React.Fragment, null,
                         React.createElement("div", { className: "border-t border-white/20 pt-2 mt-1" },
                             React.createElement("p", { className: "text-[10px] text-[#9fae93] uppercase tracking-wide font-semibold mb-1" },
@@ -6369,7 +6386,7 @@ function RelatorioDetalheTalhao({ linha, ano, compras }) {
                 ["Lucro", "R$ " + fmtBR(lucro, 2)],
                 ["Margem de lucro", margem != null ? fmtBR(margem, 1) + "%" : "—"],
             ] }) },
-        { id: "custosaca", label: "Custo por saca", gerar: () => ({ titulo: "Custo por saca", linhas: custoPorSaca == null ? [] : [["Sacas esperadas", fmtBR(sacasEsperadas, 0)], ["Custo por saca (esperado)", "R$ " + fmtBR(custoPorSaca, 2)]] }) },
+        { id: "custosaca", label: "Custo por saca (ou por planta, se n\u00E3o houver produ\u00E7\u00E3o esperada)", gerar: () => (custoPorSaca == null && Number(talhao.numPlantas) > 0) ? ({ titulo: "Custo por planta", linhas: [["Plantas", fmtBR(Number(talhao.numPlantas), 0)], ["Custo por planta", "R$ " + fmtBR(totalGasto / Number(talhao.numPlantas), 2)]] }) : ({ titulo: "Custo por saca", linhas: custoPorSaca == null ? [] : [["Sacas esperadas", fmtBR(sacasEsperadas, 0)], ["Custo por saca (esperado)", "R$ " + fmtBR(custoPorSaca, 2)]] }) },
         { id: "categoria", label: "Gasto por categoria", gerar: () => ({ titulo: "Gasto por categoria", linhas: categoriasOrdenadas.map(([tipo, valor]) => [tipo, "R$ " + fmtBR(valor, 2)]) }) },
         { id: "aplicados", label: "Produtos aplicados (quantidade e custo médio)", gerar: () => ({ titulo: "Produtos aplicados", linhas: aplicadosTalhao.map((m) => [m.produto, m.custo > 0 ? "R$ " + fmtBR(m.custo, 2) : "—", m.categoria + " · " + m.n + (m.n === 1 ? " aplicação" : " aplicações") + (m.qtd > 0 ? " · " + numRel(m.qtd) + " " + m.un : "") + (m.precoUn != null ? " · custo médio R$ " + fmtBR(m.precoUn, 2) + "/" + m.un : "")]) }) },
         { id: "irrig", label: "Irrigações feitas (total e datas)", gerar: () => { const ir = ordenaDataT(ad.filter((a) => a.produto === "Irrigação")); return { titulo: "Irrigações", linhas: ir.length === 0 ? [] : [["Total de irrigações", String(ir.length)], ["Datas", ir.map((a) => dataBRrel(a.data)).join(", ")]] }; } },
@@ -6402,6 +6419,11 @@ function RelatorioDetalheTalhao({ linha, ano, compras }) {
             React.createElement("div", { className: "flex items-center justify-between" },
                 React.createElement("span", { className: "text-[#cdd7c4] text-sm" }, "Margem de lucro"),
                 React.createElement("span", { className: "font-bold " + (margem != null && margem < 0 ? "text-red-300" : "") }, margem != null ? fmtBR(margem, 1) + "%" : "—")),
+            custoPorSaca == null && Number(talhao.numPlantas) > 0 && (React.createElement("div", { className: "flex items-center justify-between border-t border-white/20 pt-2" },
+                React.createElement("span", { className: "text-[#cdd7c4] text-sm" },
+                    "Custo por planta",
+                    React.createElement("span", { className: "block text-[10px] text-[#9fae93]" }, fmtBR(Number(talhao.numPlantas), 0), " plantas \u00B7 sem produ\u00E7\u00E3o esperada")),
+                React.createElement("span", { className: "font-bold text-lg text-red-300" }, "R$ " + fmtBR(totalGasto / Number(talhao.numPlantas), 2)))),
             custoPorSaca != null && (React.createElement("div", { className: "flex items-center justify-between border-t border-white/20 pt-2" },
                 React.createElement("span", { className: "text-[#cdd7c4] text-sm" },
                     "Custo por saca",
